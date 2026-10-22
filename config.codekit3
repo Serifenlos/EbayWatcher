@@ -9,6 +9,14 @@
   ],
   "creatorBuild" : "36870",
   "files" : {
+    "\/.gitattributes" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 0,
+      "oAP" : "\/build\/.gitattributes",
+      "oF" : 0
+    },
     "\/.github" : {
       "ft" : 65536,
       "oA" : 1,
@@ -287,7 +295,7 @@
     "displayValueWasSetByUser" : 0,
     "iconImageName" : "brackets-pale",
     "iconImageWasSetByUser" : 0,
-    "lastBuiltDate" : 814353861.561234
+    "lastBuiltDate" : 814388728.03821802
   },
   "projectSettings" : {
     "abortBuildOnError" : 1,
