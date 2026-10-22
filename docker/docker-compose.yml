@@ -2,7 +2,8 @@
 # unten unter "Environment variables" EBAY_CLIENT_ID, EBAY_CLIENT_SECRET und ADMIN_PASSWORD setzen.
 services:
   ebay-watcher:
-    image: ghcr.io/DEIN-GITHUB-NAME/ebay-watcher:latest
+    # Name wie unter github.com/Serifenlos?tab=packages angezeigt (GitHub schreibt ihn klein)
+    image: ghcr.io/serifenlos/ebaywatcher:latest
     container_name: ebay-watcher
     restart: unless-stopped
     ports:
