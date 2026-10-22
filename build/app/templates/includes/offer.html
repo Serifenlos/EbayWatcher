@@ -1,0 +1,22 @@
+{# Ein Angebot in der Liste auf der Detailseite. Erwartet: v (Angebot), dim (blasser darstellen) #}
+{% import "includes/ui.html" as ui %}
+<li class="border-b border-line {{ 'opacity-70' if dim }}">
+  <a class="group/offer grid grid-cols-[68px_minmax(0,1fr)] items-start gap-x-4 gap-y-2 py-4 text-inherit no-underline md:grid-cols-[84px_minmax(0,1fr)_minmax(170px,230px)] md:items-center md:gap-5"
+     href="{{ v.url }}" target="_blank" rel="noopener noreferrer">
+    <span class="grid aspect-square place-items-center overflow-hidden rounded-thumb bg-tile">
+      {% if v.image %}<img class="{{ ui.product_image('list') }}" src="{{ v.image_large or v.image }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}
+    </span>
+    <span class="grid min-w-0 gap-0.75">
+      <span class="line-clamp-2 leading-[1.35] font-medium group-hover/offer:underline group-hover/offer:decoration-1 group-hover/offer:underline-offset-3">{{ v.title }}</span>
+      <span class="text-sm text-muted">{{ v.kind }}{% if v.auction %}, {{ v.bid_count or 0 }} {{ 'Gebot' if v.bid_count == 1 else 'Gebote' }}{% endif %}{% if v.location_text %}, {{ v.location_text }}{% endif %}</span>
+      {% for flag in v.flags %}<span class="text-meta font-medium text-tight">{{ flag }}</span>{% endfor %}
+    </span>
+    <span class="col-start-2 grid justify-items-start gap-1 text-left md:col-start-auto md:justify-items-end md:text-right">
+      <span class="{{ ui.num() }} text-section font-semibold">{{ eur(v.total) }}</span>
+      {% if v.show_shipping %}<span class="text-meta text-muted">{{ eur(v.rel_price) }} + {{ eur(v.shipping) }} Versand</span>
+      {% elif v.shipping_known and not v.shipping and not v.pickup_only %}<span class="text-meta text-muted">Versand kostenlos</span>{% endif %}
+      {{ ui.limit_line(v.ratio, 'max-w-45') }}
+      {% if v.auction and v.end_time %}<span class="text-meta text-muted">Endet in {{ ui.countdown_span(v.end_time, now) }}</span>{% endif %}
+    </span>
+  </a>
+</li>

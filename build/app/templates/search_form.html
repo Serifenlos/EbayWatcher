@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% import "includes/ui.html" as ui %}
+{% block title %}{{ 'Neues Gesuch' if mode == 'new' else 'Gesuch bearbeiten' }} – {{ app_name }}{% endblock %}
+{% block content %}
+{% set cancel = '/' if mode == 'new' else '/searches/' ~ sid %}
+<nav class="mt-5 mb-2.5 text-sm"><a class="text-muted no-underline before:mr-1.5 before:content-['‹'] hover:text-ink" href="{{ cancel }}">{{ 'Alle Gesuche' if mode == 'new' else 'Zurück zum Gesuch' }}</a></nav>
+
+<form class="mt-2 grid max-w-150 gap-7.5" method="post" action="{{ '/searches/new' if mode == 'new' else '/searches/' ~ sid ~ '/edit' }}" novalidate>
+  {{ ui.csrf_field(csrf) }}
+  <h1 class="-mb-1">{{ 'Neues Gesuch' if mode == 'new' else 'Gesuch bearbeiten' }}</h1>
+
+  <div class="grid min-w-0 gap-2">
+    <label class="{{ ui.label() }}" for="query">Wonach suchst du?</label>
+    <input class="{{ ui.input('hero') }}" id="query" name="query" value="{{ values.query }}" placeholder="zum Beispiel Leica M6" autocomplete="off"
+           {% if mode == 'new' %}autofocus{% endif %} {% if errors.query %}aria-invalid="true" aria-describedby="query-error"{% endif %}>
+    {{ ui.error(errors, 'query') }}
+    <p class="{{ ui.hint() }}">So, wie du es bei eBay ins Suchfeld tippen würdest.</p>
+  </div>
+
+  <div class="grid min-w-0 gap-2">
+    <label class="{{ ui.label() }}" for="max_price">Dein Höchstpreis</label>
+    <div class="relative max-w-60">
+      <input class="{{ ui.input('price') }}" id="max_price" name="max_price" inputmode="decimal" value="{{ values.max_price_raw }}" placeholder="250"
+             {% if errors.max_price %}aria-invalid="true" aria-describedby="max_price-error"{% endif %}>
+      <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-xl text-muted" aria-hidden="true">€</span>
+    </div>
+    {{ ui.error(errors, 'max_price') }}
+  </div>
+
+  <div class="grid border-t border-line">
+    {{ ui.switch('incl_shipping', 'Versandkosten einrechnen', 'Der Höchstpreis gilt dann für Preis plus Versand.', values.incl_shipping) }}
+    {{ ui.switch('free_shipping_only', 'Nur versandkostenfrei', 'Angebote mit Versandkosten werden ausgeblendet.', values.free_shipping_only) }}
+  </div>
+
+  <fieldset class="grid min-w-0 gap-2">
+    <legend class="{{ ui.label() }} mb-2">Angebotsformat</legend>
+    {{ ui.segmented('format', [('auction', 'Auktion'), ('fixed', 'Sofortkauf'), ('both', 'Beides')], values.format) }}
+  </fieldset>
+
+  <div class="grid min-w-0 gap-2" data-when-format="auction both">
+    <label class="{{ ui.label() }}" for="lead_minutes">Erinnerung vor Auktionsende</label>
+    <div class="relative max-w-50">
+      <input class="{{ ui.input('unit') }}" id="lead_minutes" name="lead_minutes" inputmode="numeric" value="{{ values.lead_raw }}"
+             {% if errors.lead_minutes %}aria-invalid="true" aria-describedby="lead_minutes-error"{% endif %}>
+      <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">Minuten</span>
+    </div>
+    {{ ui.error(errors, 'lead_minutes') }}
+  </div>
+
+  <fieldset class="grid min-w-0 gap-2">
+    <legend class="{{ ui.label() }} mb-2">Artikelstandort</legend>
+    {{ ui.segmented('location', [('DE', 'Deutschland'), ('EU', 'EU'), ('WORLD', 'Weltweit')], values.location) }}
+    <p class="{{ ui.hint() }}">Gezeigt werden nur Angebote, die nach Deutschland verschickt werden. Außerhalb der EU können Zoll und Einfuhrumsatzsteuer dazukommen; das steht dann in der Benachrichtigung.</p>
+  </fieldset>
+
+  <fieldset class="grid min-w-0 gap-2">
+    <legend class="{{ ui.label() }} mb-2">Zustand</legend>
+    {{ ui.segmented('condition', [('any', 'Egal'), ('new', 'Neu'), ('used', 'Gebraucht')], values.condition) }}
+  </fieldset>
+
+  <fieldset class="grid min-w-0 gap-2">
+    <legend class="{{ ui.label() }} mb-2">Angebote nur zur Abholung</legend>
+    <div class="grid gap-1">
+      {{ ui.choice('pickup_mode', 'radius', values.pickup_mode, 'Im Umkreis von ' ~ radius ~ ' km', 'Den Umkreis legst du in den Einstellungen fest.') }}
+      {{ ui.choice('pickup_mode', 'all', values.pickup_mode, 'Alle zeigen', 'Mit Entfernung, deutlich markiert in der Benachrichtigung.') }}
+      {{ ui.choice('pickup_mode', 'hide', values.pickup_mode, 'Ausblenden', 'Nur Angebote mit Versand.') }}
+    </div>
+    {% if not has_plz %}<p class="{{ ui.hint('warn') }}">Dafür braucht Ebay Watcher deine Postleitzahl. <a href="/settings#standort">PLZ eintragen</a></p>{% endif %}
+  </fieldset>
+
+  <details class="group/more border-y border-line py-3.5" {% if values.exclude or values.name %}open{% endif %}>
+    <summary class="flex cursor-pointer list-none justify-between font-medium [&::-webkit-details-marker]:hidden after:text-xl after:leading-none after:text-muted after:content-['+'] group-open/more:mb-4.5 group-open/more:after:content-['–']">Weitere Optionen</summary>
+    <div class="grid min-w-0 gap-2">
+      <label class="{{ ui.label() }}" for="exclude">Ausschließen, wenn der Titel enthält</label>
+      <input class="{{ ui.input() }}" id="exclude" name="exclude" value="{{ values.exclude }}" placeholder="defekt, Ersatzteil, Bastler" autocomplete="off">
+      <p class="{{ ui.hint() }}">Mehrere Wörter mit Komma trennen.</p>
+    </div>
+    <div class="mt-5 grid min-w-0 gap-2">
+      <label class="{{ ui.label() }}" for="name">Eigener Name</label>
+      <input class="{{ ui.input() }}" id="name" name="name" value="{{ values.name }}" placeholder="Leer lassen, dann gilt der Suchbegriff" autocomplete="off">
+    </div>
+  </details>
+
+  <div class="grid border-t border-line">
+    {{ ui.switch('active', 'Gesuch aktiv', 'Pausierte Gesuche werden nicht durchsucht.', values.active) }}
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2.5">
+    <button class="{{ ui.button('primary') }}" type="submit">{{ 'Gesuch anlegen' if mode == 'new' else 'Änderungen speichern' }}</button>
+    <a class="{{ ui.button('quiet') }}" href="{{ cancel }}">Abbrechen</a>
+  </div>
+</form>
+{% endblock %}

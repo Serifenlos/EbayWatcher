@@ -1,0 +1,7 @@
+# Gilt für docker/Dockerfile: nur an Docker schicken, was das Image wirklich braucht.
+*
+!build/app
+!docker/requirements.txt
+!docker/docker-entrypoint.sh
+**/__pycache__
+**/.DS_Store

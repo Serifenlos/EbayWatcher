@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% import "includes/ui.html" as ui %}
+{% block title %}{{ s.title }} – {{ app_name }}{% endblock %}
+{% block content %}
+<nav class="mt-5 mb-2.5 text-sm"><a class="text-muted no-underline before:mr-1.5 before:content-['‹'] hover:text-ink" href="/">Alle Gesuche</a></nav>
+
+<section class="mt-2 mb-2 flex flex-wrap items-start justify-between gap-x-8 gap-y-5">
+  <div>
+    <h1>{{ s.title }}</h1>
+    <p class="mt-1.5 max-w-[62ch] text-muted">{{ s.description }}. {{ s.limit }}.{% if s.exclude %} Ohne „{{ s.exclude }}“.{% endif %}</p>
+    <p class="mt-3 flex items-center gap-2 text-sm text-ink-2">
+      <span class="size-1.75 rounded-full {{ 'bg-accent' if s.active else 'bg-muted opacity-60' }}" aria-hidden="true"></span>
+      {% if s.active %}Aktiv, zuletzt gesucht {{ ago(s.last_run, now) }}{% else %}Pausiert{% endif %}
+    </p>
+  </div>
+  <div class="flex flex-wrap items-center gap-2.5">
+    <a class="{{ ui.button() }}" href="/searches/{{ s.id }}/edit">Bearbeiten</a>
+    {% if s.active %}
+    <form method="post" action="/searches/{{ s.id }}/run">{{ ui.csrf_field(csrf) }}<button class="{{ ui.button() }}" type="submit">Jetzt suchen</button></form>
+    {% endif %}
+    <form method="post" action="/searches/{{ s.id }}/toggle">{{ ui.csrf_field(csrf) }}<button class="{{ ui.button() }}" type="submit">{{ 'Pausieren' if s.active else 'Fortsetzen' }}</button></form>
+  </div>
+</section>
+
+{% if s.last_error %}<p class="{{ ui.notice('error') }} my-3.5">{{ s.last_error }}</p>{% endif %}
+
+<section class="mt-12">
+  <h2 class="mb-2 flex items-baseline gap-2.5">Unter deinem Limit <span class="font-num text-ui font-medium text-muted">{{ s.count }}</span></h2>
+  {% if s.matches %}
+  <ol class="mt-2 border-t border-line">{% for v in s.matches %}{% set dim = false %}{% include "includes/offer.html" %}{% endfor %}</ol>
+  {% elif not s.last_run %}
+  <p class="mt-1.5 mb-3 max-w-[70ch] text-muted">Die erste Suche startet gleich. Lade die Seite in einem Moment neu.</p>
+  {% else %}
+  <p class="mt-1.5 mb-3 max-w-[70ch] text-muted">Gerade liegt nichts unter deinem Limit. Ebay Watcher sucht weiter und meldet sich.</p>
+  {% endif %}
+</section>
+
+{% if s.over %}
+<section class="mt-12">
+  <h2 class="mb-2 flex items-baseline gap-2.5">Mit Versand über dem Limit <span class="font-num text-ui font-medium text-muted">{{ s.over|length }}</span></h2>
+  <p class="mt-1.5 mb-3 max-w-[70ch] text-muted">Der Artikelpreis passt, erst die Versandkosten heben ihn über dein Limit. Dafür gibt es keine Benachrichtigung.</p>
+  <ol class="mt-2 border-t border-line">{% for v in s.over %}{% set dim = true %}{% include "includes/offer.html" %}{% endfor %}</ol>
+</section>
+{% endif %}
+
+<section class="mt-16 border-t border-line pt-5">
+  <form method="post" action="/searches/{{ s.id }}/delete" data-confirm="Gesuch „{{ s.title }}“ wirklich löschen?">
+    {{ ui.csrf_field(csrf) }}<button class="cursor-pointer text-over underline underline-offset-3" type="submit">Gesuch löschen</button>
+  </form>
+</section>
+{% endblock %}

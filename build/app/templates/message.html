@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% import "includes/ui.html" as ui %}
+{% block title %}{{ heading }} – {{ app_name }}{% endblock %}
+{% block content %}
+<section class="mt-16 grid max-w-130 justify-items-start gap-4.5">
+  <h1>{{ heading }}</h1>
+  <p class="text-muted">{{ text }}</p>
+  {% if link %}<a class="{{ ui.button() }}" href="{{ link }}">{{ link_text }}</a>{% endif %}
+</section>
+{% endblock %}

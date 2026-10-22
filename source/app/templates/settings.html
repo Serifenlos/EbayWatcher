@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% import "includes/ui.html" as ui %}
+{% block title %}Einstellungen – {{ app_name }}{% endblock %}
+{% block content %}
+{#
+  Jeder Bereich ist ein "Panel": links Überschrift und Erklärung, rechts die Formulare.
+  Auf schmalen Bildschirmen stehen beide Teile untereinander.
+#}
+{% set panel = "grid scroll-mt-6 gap-x-14 gap-y-6 border-t border-line py-8 md:grid-cols-[minmax(0,260px)_minmax(0,560px)] md:py-10" %}
+{% set panel_text = "mt-1.5 text-note text-muted" %}
+{% set stack = "grid content-start gap-5.5" %}
+{% set subsection = "grid gap-3.5 border-t border-line pt-6.5" %}
+
+<section class="mt-9 mb-2"><h1>Einstellungen</h1></section>
+
+<section class="{{ panel }}" id="standort">
+  <div>
+    <h2>Standort und Suche</h2>
+    <p class="{{ panel_text }}">Gilt für alle Gesuche. Mit deiner Postleitzahl berechnet eBay Versandkosten und Entfernungen genauer.</p>
+  </div>
+  <form class="{{ stack }}" method="post" action="/settings/general" novalidate>
+    {{ ui.csrf_field(csrf) }}
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-5">
+      <div class="grid min-w-0 gap-2">
+        <label class="{{ ui.label() }}" for="plz">Postleitzahl</label>
+        <input class="{{ ui.input() }}" id="plz" name="plz" value="{{ s.plz }}" inputmode="numeric" maxlength="5" placeholder="10115" autocomplete="postal-code" {% if errors.plz %}aria-invalid="true"{% endif %}>
+        {{ ui.error(errors, 'plz') }}
+      </div>
+      <div class="grid min-w-0 gap-2">
+        <label class="{{ ui.label() }}" for="radius_km">Umkreis für Abholung</label>
+        <div class="relative max-w-60">
+          <input class="{{ ui.input('unit') }}" id="radius_km" name="radius_km" value="{{ s.radius_km }}" inputmode="numeric" {% if errors.radius_km %}aria-invalid="true"{% endif %}>
+          <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">km</span>
+        </div>
+        {{ ui.error(errors, 'radius_km') }}
+      </div>
+    </div>
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-5">
+      <div class="grid min-w-0 gap-2">
+        <label class="{{ ui.label() }}" for="lead_minutes">Erinnerung vor Auktionsende</label>
+        <div class="relative max-w-60">
+          <input class="{{ ui.input('unit') }}" id="lead_minutes" name="lead_minutes" value="{{ s.lead_minutes }}" inputmode="numeric" {% if errors.lead_minutes %}aria-invalid="true"{% endif %}>
+          <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">Min</span>
+        </div>
+        <p class="{{ ui.hint() }}">Vorgabe für neue Gesuche.</p>
+        {{ ui.error(errors, 'lead_minutes') }}
+      </div>
+      <div class="grid min-w-0 gap-2">
+        <label class="{{ ui.label() }}" for="interval_minutes">Suchintervall</label>
+        <div class="relative max-w-60">
+          <input class="{{ ui.input('unit') }}" id="interval_minutes" name="interval_minutes" value="{{ s.interval_minutes }}" inputmode="numeric" {% if errors.interval_minutes %}aria-invalid="true"{% endif %}>
+          <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">Min</span>
+        </div>
+        <p class="{{ ui.hint() }}">So oft wird nach neuen Angeboten gesucht.</p>
+        {{ ui.error(errors, 'interval_minutes') }}
+      </div>
+    </div>
+    <div class="grid min-w-0 gap-2">
+      <label class="{{ ui.label() }}" for="app_url">Adresse von Ebay Watcher <span class="font-normal text-muted">optional</span></label>
+      <input class="{{ ui.input() }}" id="app_url" name="app_url" value="{{ s.app_url }}" placeholder="http://192.168.178.20:8765" autocomplete="off" {% if errors.app_url %}aria-invalid="true"{% endif %}>
+      <p class="{{ ui.hint() }}">Dann enthält jede Benachrichtigung auch einen Link zurück zu Ebay Watcher.</p>
+      {{ ui.error(errors, 'app_url') }}
+    </div>
+    <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button('primary') }}" type="submit">Speichern</button></div>
+  </form>
+</section>
+
+<section class="{{ panel }}" id="benachrichtigungen">
+  <div>
+    <h2>Benachrichtigungen</h2>
+    <p class="{{ panel_text }}">Ebay Watcher schickt Pushs an deine ntfy-Instanz. Abonniere dasselbe Topic in der ntfy-App auf deinem Handy.</p>
+  </div>
+  <div class="{{ stack }}">
+    <form class="{{ stack }}" method="post" action="/settings/ntfy" novalidate>
+      {{ ui.csrf_field(csrf) }}
+      <div class="grid min-w-0 gap-2">
+        <label class="{{ ui.label() }}" for="ntfy_url">Adresse deines ntfy-Servers</label>
+        <input class="{{ ui.input() }}" id="ntfy_url" name="ntfy_url" value="{{ s.ntfy_url }}" placeholder="https://ntfy.deine-domain.de" autocomplete="off" spellcheck="false" {% if errors.ntfy_url %}aria-invalid="true"{% endif %}>
+        {{ ui.error(errors, 'ntfy_url') }}
+      </div>
+      <div class="grid min-w-0 gap-2">
+        <label class="{{ ui.label() }}" for="ntfy_topic">Topic</label>
+        <input class="{{ ui.input() }}" id="ntfy_topic" name="ntfy_topic" value="{{ s.ntfy_topic }}" placeholder="ebay-watcher" autocomplete="off" spellcheck="false" {% if errors.ntfy_topic %}aria-invalid="true"{% endif %}>
+        {{ ui.error(errors, 'ntfy_topic') }}
+      </div>
+      <div class="grid min-w-0 gap-2">
+        <label class="{{ ui.label() }}" for="ntfy_token">Access-Token</label>
+        <input class="{{ ui.input() }}" id="ntfy_token" name="ntfy_token" type="password" value="" autocomplete="off"
+               placeholder="{{ 'Gespeichert, zum Ändern neu eingeben' if has_token else 'tk_…' }}">
+        <p class="{{ ui.hint() }}">Empfohlen, weil dein ntfy-Server aus dem Internet erreichbar ist.</p>
+        {% if has_token %}
+        <label class="flex cursor-pointer items-start gap-2.5 text-note"><input class="{{ ui.checkbox() }}" type="checkbox" name="clear_token" value="1"> Gespeicherten Token entfernen</label>
+        {% endif %}
+      </div>
+      <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button('primary') }}" type="submit">Speichern</button></div>
+    </form>
+    <form method="post" action="/settings/ntfy/test">
+      {{ ui.csrf_field(csrf) }}<button class="{{ ui.button() }}" type="submit" {% if not (s.ntfy_url and s.ntfy_topic) %}disabled{% endif %}>Testnachricht senden</button>
+    </form>
+    {% if ntfy_error %}<p class="{{ ui.notice('error') }}">{{ ntfy_error }}</p>{% endif %}
+  </div>
+</section>
+
+<section class="{{ panel }}" id="sicherheit">
+  <div>
+    <h2>Anmeldung und Sicherheit</h2>
+    <p class="{{ panel_text }}">Angemeldet als {{ user.username }}.</p>
+  </div>
+  <div class="{{ stack }}">
+    <form class="grid gap-4" method="post" action="/settings/password" novalidate>
+      {{ ui.csrf_field(csrf) }}
+      <h3>Passwort ändern</h3>
+      <input type="text" name="username" value="{{ user.username }}" autocomplete="username" hidden>
+      <div class="grid min-w-0 gap-2">
+        <label class="{{ ui.label() }}" for="current">Aktuelles Passwort</label>
+        <input class="{{ ui.input() }}" id="current" name="current" type="password" autocomplete="current-password" {% if errors.current %}aria-invalid="true"{% endif %}>
+        {{ ui.error(errors, 'current') }}
+      </div>
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-5">
+        <div class="grid min-w-0 gap-2">
+          <label class="{{ ui.label() }}" for="new">Neues Passwort</label>
+          <input class="{{ ui.input() }}" id="new" name="new" type="password" autocomplete="new-password" minlength="10" {% if errors.new %}aria-invalid="true"{% endif %}>
+          {{ ui.error(errors, 'new') }}
+        </div>
+        <div class="grid min-w-0 gap-2">
+          <label class="{{ ui.label() }}" for="repeat">Wiederholen</label>
+          <input class="{{ ui.input() }}" id="repeat" name="repeat" type="password" autocomplete="new-password" {% if errors.repeat %}aria-invalid="true"{% endif %}>
+          {{ ui.error(errors, 'repeat') }}
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button() }}" type="submit">Passwort ändern</button></div>
+    </form>
+
+    <div class="{{ subsection }}">
+      <h3>Zwei-Faktor-Anmeldung</h3>
+      {% if user.totp_enabled %}
+      <p class="text-muted">Aktiv. Beim Anmelden fragt Ebay Watcher zusätzlich nach dem Code aus deiner Authenticator-App.</p>
+      <form class="grid gap-4" method="post" action="/settings/2fa/disable" novalidate>
+        {{ ui.csrf_field(csrf) }}
+        <div class="grid min-w-0 gap-2">
+          <label class="{{ ui.label() }}" for="disable_password">Zum Ausschalten Passwort eingeben</label>
+          <input class="{{ ui.input() }}" id="disable_password" name="password" type="password" autocomplete="current-password" {% if errors.disable_2fa %}aria-invalid="true"{% endif %}>
+          {{ ui.error(errors, 'disable_2fa') }}
+        </div>
+        <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button() }}" type="submit">Zwei-Faktor ausschalten</button></div>
+      </form>
+      {% else %}
+      <p class="text-muted">Schützt dein Konto zusätzlich mit einem Code aus einer App wie dem iPhone-Passwortmanager, 1Password oder Google Authenticator.</p>
+      <form method="post" action="/settings/2fa/start">{{ ui.csrf_field(csrf) }}<button class="{{ ui.button() }}" type="submit">Zwei-Faktor einrichten</button></form>
+      {% endif %}
+    </div>
+
+    <div class="{{ subsection }}">
+      <h3>Angemeldete Geräte</h3>
+      <ul class="grid gap-3">
+        {% for d in sessions %}
+        <li class="grid gap-px">
+          <span class="font-medium">{{ d.device }}{% if d.current %} <span class="ml-1.5 inline-block rounded-full bg-accent-soft px-2 py-px align-[1px] text-xs font-semibold text-accent">Dieses Gerät</span>{% endif %}</span>
+          <span class="text-meta text-muted">{{ 'Angemeldet bleiben' if d.remember else 'Sitzung' }}, zuletzt aktiv {{ ago(d.last_seen) }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if sessions|length > 1 %}
+      <form method="post" action="/settings/sessions">{{ ui.csrf_field(csrf) }}<button class="{{ ui.button() }}" type="submit">Alle anderen Geräte abmelden</button></form>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="{{ panel }}" id="ebay">
+  <div>
+    <h2>eBay-Verbindung</h2>
+    <p class="{{ panel_text }}">Die Zugangsdaten stehen als Umgebungsvariablen im Portainer-Stack, nicht hier.</p>
+  </div>
+  <div class="{{ stack }}">
+    {% set fact = "flex justify-between gap-4 border-b border-line pb-2.5" %}
+    <dl class="grid gap-2.5">
+      <div class="{{ fact }}"><dt class="text-muted">Zugangsdaten</dt><dd class="text-right">{{ 'Hinterlegt' if ebay_configured else 'Fehlen' }}</dd></div>
+      <div class="{{ fact }}"><dt class="text-muted">Abfragen heute</dt><dd class="{{ ui.num() }} text-right">{{ api_calls }}</dd></div>
+      {% if ebay_check %}
+        {% if ebay_check.ok %}
+          {% if ebay_check.remaining is not none %}
+          <div class="{{ fact }}"><dt class="text-muted">Kontingent laut eBay</dt><dd class="{{ ui.num() }} text-right">{{ ebay_check.remaining }} von {{ ebay_check.limit }} frei</dd></div>
+          {% endif %}
+          <div class="{{ fact }}"><dt class="text-muted">Letzte Prüfung</dt><dd class="text-right">Verbindung steht, {{ ago(ebay_check.at) }}</dd></div>
+        {% else %}
+          <div class="{{ fact }}"><dt class="text-muted">Letzte Prüfung</dt><dd class="text-right text-over">{{ ebay_check.error }}</dd></div>
+        {% endif %}
+      {% endif %}
+    </dl>
+    <form method="post" action="/settings/ebay/test">{{ ui.csrf_field(csrf) }}<button class="{{ ui.button() }}" type="submit" {% if not ebay_configured %}disabled{% endif %}>Verbindung prüfen</button></form>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,176 @@
+/*
+ * Ebay Watcher – Stylesheet (Tailwind CSS 4)
+ *
+ * Das ist die QUELLE. CodeKit übersetzt sie über Tailwind nach
+ *   build/app/static/css/app-min.css
+ * Die fertige Datei enthält nur die Klassen, die in den Templates wirklich vorkommen.
+ *
+ * Aufbau dieser Datei:
+ *   1. Tailwind laden und festlegen, welche Dateien nach Klassen durchsucht werden
+ *   2. Design-Tokens (Farben, Schriften, Größen) – daraus entstehen Klassen wie bg-surface oder text-meta
+ *   3. Dunkelmodus: dieselben Tokens mit dunklen Werten
+ *   4. Eigene Varianten für die Ansicht „Karten“ und „Liste“
+ *   5. Grundstile für HTML-Elemente
+ *
+ * Alles Weitere steht als Tailwind-Klassen direkt in den Templates.
+ * Wiederkehrende Bausteine (Buttons, Eingabefelder, Schalter …) liegen in templates/includes/ui.html.
+ */
+
+
+/* ------------------------------------------------------------------ 1. Tailwind und Quellen */
+
+/* source(none): Tailwind sucht nicht selbst im ganzen Projekt, sondern nur in den Ordnern unten. */
+@import "tailwindcss" source(none);
+
+@source "../../templates";   /* source/app/templates – alle Jinja-Templates */
+@source "../js";             /* source/app/static/js  – Klassen und Attribute, die JavaScript setzt */
+
+
+/* ------------------------------------------------------------------ 2. Design-Tokens */
+
+/*
+ * "static" sorgt dafür, dass alle Tokens als CSS-Variablen im Ergebnis landen,
+ * auch wenn gerade keine Klasse sie benutzt. Der Dunkelmodus unten überschreibt sie.
+ */
+@theme static {
+  /* Nur unsere eigenen Farben, Tailwinds Standardpalette (red-500 usw.) wird nicht gebraucht. */
+  --color-*: initial;
+
+  --color-canvas: #F4F5F3;        /* Seitenhintergrund */
+  --color-surface: #FFFFFF;       /* Buttons, Eingabefelder */
+  --color-tile: #E8EAE7;          /* Bildkacheln, Hinweise, Segment-Hintergrund */
+  --color-ink: #1C201E;           /* Text */
+  --color-ink-2: #464D49;         /* Text, etwas zurückgenommen */
+  --color-muted: #737A76;         /* Nebeninformationen */
+  --color-line: #DDE1DC;          /* Linien und Rahmen */
+  --color-accent: #2C6A5D;        /* Grün: Hauptaktion, Links, „unter Limit“ */
+  --color-accent-ink: #FFFFFF;    /* Text auf Grün */
+  --color-accent-soft: #E2ECE8;   /* helles Grün für Meldungen und Fokus */
+  --color-tight: #A3650C;         /* Bernstein: knapp am Limit, Abholung, bald zu Ende */
+  --color-over: #A4473B;          /* Rot: über Limit, Fehler */
+  --color-over-soft: #F6E7E4;
+  --color-white: #FFFFFF;         /* nur für den Hintergrund des QR-Codes */
+
+  /* Abgeleitete Farben, passen sich im Dunkelmodus automatisch an */
+  --color-accent-strong: color-mix(in srgb, var(--color-accent) 88%, var(--color-ink));
+  --color-control: color-mix(in srgb, var(--color-ink) 30%, var(--color-line));
+
+  /* Schriften: Systemschrift, Zahlen in der abgerundeten Variante (auf Apple-Geräten SF Pro Rounded) */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-num: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Schriftgrößen mit Namen statt Zahlen: text-meta, text-note, text-ui … */
+  --text-meta: 13.5px;      --text-meta--line-height: 1.45;    /* Hinweise, Fußzeilen */
+  --text-note: 14.5px;      --text-note--line-height: 1.5;     /* Hinweisboxen, Einleitungen */
+  --text-ui: 15px;          --text-ui--line-height: 1.4;       /* Buttons, Navigation */
+  --text-title: 17px;       --text-title--line-height: 1.3;    /* Titel in Karten und Listen */
+  --text-section: 19px;     --text-section--line-height: 1.3;  /* Zwischenüberschriften, Preise */
+  --text-figure: 21px;      --text-figure--line-height: 1.25;  /* große Preise, Suchfeld */
+  --text-display: clamp(26px, 4vw, 32px);
+  --text-display--line-height: 1.15;                            /* Seitenüberschrift */
+
+  /* Ecken */
+  --radius-tile: 14px;      /* rounded-tile:    große Bildkacheln */
+  --radius-control: 10px;   /* rounded-control: Buttons, Felder, Hinweise */
+  --radius-thumb: 10px;     /* rounded-thumb:   kleine Vorschaubilder */
+
+  /* Seitenrand, wächst mit der Fensterbreite: px-gutter */
+  --spacing-gutter: clamp(20px, 5vw, 48px);
+
+  /* Zusätzlicher kleiner Breakpoint für sehr schmale Handys: xs: und max-xs: */
+  --breakpoint-xs: 26.25rem;   /* 420px */
+
+  /* Spielraum-Linie fährt beim Laden aus: animate-gauge */
+  --animate-gauge: gauge-in 900ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+
+  @keyframes gauge-in {
+    from { transform: scaleX(0); }
+  }
+}
+
+
+/* ------------------------------------------------------------------ 3. Dunkelmodus */
+
+/*
+ * Hell oder dunkel folgt der Systemeinstellung. Weil alle Klassen nur Variablen benutzen,
+ * reicht es, die Werte hier auszutauschen. In den Templates steht dark: nur dort,
+ * wo sich im Dunkeln mehr als die Farbe ändert (zum Beispiel die Artikelbilder).
+ */
+@layer base {
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-canvas: #161917;
+      --color-surface: #1E2220;
+      --color-tile: #242926;
+      --color-ink: #E8ECE9;
+      --color-ink-2: #BAC1BD;
+      --color-muted: #8F9793;
+      --color-line: #2E3431;
+      --color-accent: #7DC3B1;
+      --color-accent-ink: #0F201B;
+      --color-accent-soft: #1F302B;
+      --color-tight: #E3AB58;
+      --color-over: #E8907F;
+      --color-over-soft: #33221F;
+    }
+  }
+}
+
+
+/* ------------------------------------------------------------------ 4. Ansicht „Karten“ und „Liste“ */
+
+/*
+ * Die Übersicht trägt data-view="cards" oder data-view="list" (umgeschaltet per JavaScript).
+ * Mit diesen Varianten gilt eine Klasse nur in einer der beiden Ansichten:
+ *   view-cards:mt-3.5   view-list:hidden
+ */
+@custom-variant view-cards (&:where([data-view="cards"], [data-view="cards"] *));
+@custom-variant view-list (&:where([data-view="list"], [data-view="list"] *));
+
+
+/* ------------------------------------------------------------------ 5. Grundstile */
+
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font: 400 16px/1.5 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  a {
+    color: var(--color-accent);
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  h1, h2, h3 {
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  h1 {
+    font-size: var(--text-display);
+    line-height: var(--text-display--line-height);
+    letter-spacing: -0.022em;
+  }
+  h2 {
+    font-size: var(--text-section);
+    line-height: var(--text-section--line-height);
+  }
+  h3 {
+    font-size: 16px;
+    line-height: 1.4;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}

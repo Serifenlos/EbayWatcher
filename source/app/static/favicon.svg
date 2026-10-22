@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <style>
+    .ring { fill: none; stroke: #1C201E; stroke-width: 1.8; opacity: .3; }
+    .arc { fill: none; stroke: #2C6A5D; stroke-width: 2.2; stroke-linecap: round; }
+    .dot { fill: #1C201E; }
+    @media (prefers-color-scheme: dark) {
+      .ring { stroke: #E8ECE9; } .arc { stroke: #7DC3B1; } .dot { fill: #E8ECE9; }
+    }
+  </style>
+  <circle class="ring" cx="12" cy="12" r="9"/>
+  <path class="arc" d="M12 3a9 9 0 0 1 9 9"/>
+  <circle class="dot" cx="12" cy="12" r="2"/>
+</svg>

@@ -1,0 +1,41 @@
+{% import "includes/ui.html" as ui -%}
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F4F5F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161917" media="(prefers-color-scheme: dark)">
+<meta name="referrer" content="no-referrer">
+<title>{% block title %}{{ app_name }}{% endblock %}</title>
+<link rel="icon" href="{{ asset('favicon.svg') }}" type="image/svg+xml">
+<link rel="stylesheet" href="{{ asset('css/app-min.css') }}">
+<script src="{{ asset('js/app-min.js') }}" defer></script>
+</head>
+<body>
+{% if signed_in %}
+<header class="mx-auto flex max-w-280 items-center justify-between gap-4 px-gutter py-3.5 xs:py-4.5">
+  <a class="inline-flex items-center gap-2.5 text-title font-semibold tracking-[-0.01em] text-ink no-underline" href="/" aria-label="Zur Übersicht">
+    {{ ui.mark() }}<span class="max-xs:hidden">{{ app_name }}</span>
+  </a>
+  <nav class="flex items-center gap-[clamp(14px,3vw,28px)] text-ui" aria-label="Hauptnavigation">
+    {% set nav_link = "py-1 text-muted no-underline hover:text-ink aria-[current=page]:font-semibold aria-[current=page]:text-ink" %}
+    <a class="{{ nav_link }}" href="/" {% if active == 'searches' %}aria-current="page"{% endif %}>Gesuche</a>
+    <a class="{{ nav_link }}" href="/settings" {% if active == 'settings' %}aria-current="page"{% endif %}>Einstellungen</a>
+    <form method="post" action="/logout">
+      {{ ui.csrf_field(csrf) }}
+      <button class="cursor-pointer py-1 text-muted hover:text-ink" type="submit">Abmelden</button>
+    </form>
+  </nav>
+</header>
+{% endif %}
+<main class="{% block main_class %}mx-auto max-w-280 px-gutter pt-2 pb-24{% endblock %}">
+  {% block flash %}
+  {% if flash_ok %}<p class="mt-2 inline-block rounded-control bg-accent-soft px-3.5 py-2.25 text-sm font-medium text-accent" role="status">{{ flash_ok }}</p>{% endif %}
+  {% if flash_err %}<p class="mt-2 inline-block rounded-control bg-over-soft px-3.5 py-2.25 text-sm font-medium text-over" role="alert">{{ flash_err }}</p>{% endif %}
+  {% endblock %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

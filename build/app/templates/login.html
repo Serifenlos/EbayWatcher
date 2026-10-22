@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% import "includes/ui.html" as ui %}
+{% block title %}Anmelden – {{ app_name }}{% endblock %}
+{% block main_class %}grid min-h-dvh place-items-center px-gutter pt-6{% endblock %}
+{% block flash %}{% endblock %}
+{% block content %}
+<div class="w-full max-w-90 pb-[8vh]">
+  <p class="mb-7 inline-flex items-center gap-3 text-2xl font-semibold tracking-[-0.01em]">{{ ui.mark(30) }}<span>{{ app_name }}</span></p>
+  {% if flash_ok %}<p class="mb-6 rounded-control bg-accent-soft px-3.5 py-2.25 text-sm font-medium text-accent" role="status">{{ flash_ok }}</p>{% endif %}
+  {% if error %}<p class="{{ ui.notice('error') }} mb-4" role="alert">{{ error }}</p>{% endif %}
+  <form class="mt-2 grid gap-4.5" method="post" action="/login" novalidate>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="grid gap-2">
+      <label class="{{ ui.label() }}" for="username">Benutzername</label>
+      <input class="{{ ui.input() }}" id="username" name="username" value="{{ username }}" autocomplete="username" autocapitalize="none" spellcheck="false" required {% if not username %}autofocus{% endif %}>
+    </div>
+    <div class="grid gap-2">
+      <label class="{{ ui.label() }}" for="password">Passwort</label>
+      <input class="{{ ui.input() }}" id="password" name="password" type="password" autocomplete="current-password" required {% if username %}autofocus{% endif %}>
+    </div>
+    <label class="flex cursor-pointer items-start gap-2.5 text-ui">
+      <input class="{{ ui.checkbox() }}" type="checkbox" name="remember" value="1">
+      <span>Angemeldet bleiben <span class="{{ ui.hint() }}">3 Monate auf diesem Gerät</span></span>
+    </label>
+    <button class="{{ ui.button('primary', wide=true) }}" type="submit">Anmelden</button>
+  </form>
+</div>
+{% endblock %}

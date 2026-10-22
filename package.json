@@ -1,0 +1,14 @@
+{
+  "name": "ebay-watcher",
+  "private": true,
+  "description": "Werkzeuge für den CodeKit-Build von Ebay Watcher (Tailwind CSS über PostCSS)",
+  "devDependencies": {
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.3.0"
+  },
+  "dependencies": {
+    "@tailwindcss/oxide-darwin-arm64": "^4.3.3",
+    "@tailwindcss/postcss": "^4.3.3",
+    "lightningcss-darwin-arm64": "^1.33.0"
+  }
+}

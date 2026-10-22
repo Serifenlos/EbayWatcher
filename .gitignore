@@ -1,0 +1,25 @@
+# ------------------------------------------------------------------
+# build/ wird absichtlich MIT committet:
+# GitHub baut das Docker-Image aus genau dem, was CodeKit erzeugt hat.
+# ------------------------------------------------------------------
+
+# macOS
+.DS_Store
+
+# Node-Pakete für CodeKit (Tailwind). Werden über package.json installiert.
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Lokale Testdaten und Geheimnisse – nie ins Repository
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+
+# Alter Stand aus dem Chat, nur zum Nachschlagen
+temp/

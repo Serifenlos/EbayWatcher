@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% import "includes/ui.html" as ui %}
+{% block title %}Zwei-Faktor einrichten – {{ app_name }}{% endblock %}
+{% block content %}
+<nav class="mt-5 mb-2.5 text-sm"><a class="text-muted no-underline before:mr-1.5 before:content-['‹'] hover:text-ink" href="/settings#sicherheit">Zurück zu den Einstellungen</a></nav>
+<section class="max-w-130">
+  <h1>Zwei-Faktor einrichten</h1>
+  <p class="mt-1.5 text-muted">Scanne den Code mit deiner Authenticator-App und gib danach den angezeigten sechsstelligen Code ein.</p>
+  <div class="mt-6 mb-3.5 inline-block rounded-tile bg-white p-3.5"><img class="size-50" src="{{ qr }}" alt="QR-Code für die Authenticator-App" width="200" height="200"></div>
+  <p class="text-muted">Scannen klappt nicht? Gib diesen Schlüssel von Hand ein:</p>
+  <p class="{{ ui.num() }} mt-1 mb-6 text-title tracking-[0.08em] break-all">{{ secret }}</p>
+  {% if error %}<p class="{{ ui.notice('error') }} my-3.5" role="alert">{{ error }}</p>{% endif %}
+  <form class="grid gap-5" method="post" action="/settings/2fa/enable" novalidate>
+    {{ ui.csrf_field(csrf) }}
+    <div class="grid gap-2">
+      <label class="{{ ui.label() }}" for="code">Code aus der App</label>
+      <input class="{{ ui.input('code') }}" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus>
+    </div>
+    <div class="flex flex-wrap items-center gap-2.5">
+      <button class="{{ ui.button('primary') }}" type="submit">Aktivieren</button>
+      <a class="{{ ui.button('quiet') }}" href="/settings#sicherheit">Abbrechen</a>
+    </div>
+  </form>
+</section>
+{% endblock %}
