@@ -191,4 +191,18 @@
     <form method="post" action="/settings/ebay/test">{{ ui.csrf_field(csrf) }}<button class="{{ ui.button() }}" type="submit" {% if not ebay_configured %}disabled{% endif %}>Verbindung prüfen</button></form>
   </div>
 </section>
+
+<section class="{{ panel }}" id="info">
+  <div>
+    <h2>Über Ebay Watcher</h2>
+    <p class="{{ panel_text }}">Alle Versionen stehen auf GitHub.</p>
+  </div>
+  <div class="{{ stack }}">
+    {% set fact = "flex justify-between gap-4 border-b border-line pb-2.5" %}
+    <dl class="grid gap-2.5">
+      <div class="{{ fact }}"><dt class="text-muted">Version</dt><dd class="{{ ui.num() }} text-right">{{ app_version }}</dd></div>
+    </dl>
+    <p><a href="{{ repo_url }}/tags" target="_blank" rel="noopener noreferrer">Versionen auf GitHub ansehen</a></p>
+  </div>
+</section>
 {% endblock %}

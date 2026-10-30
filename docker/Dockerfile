@@ -25,6 +25,12 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
  && ! grep -q '@import "tailwindcss"' app/static/css/app-min.css \
  || (echo "build/app ist unvollständig oder das CSS ist nicht übersetzt. Bitte in CodeKit bauen und build/ committen." && exit 1)
 
+# Versionsnummer, übergibt GitHub beim Bauen (siehe VERSION und scripts/version.py).
+# Steht bewusst hier unten, damit eine neue Nummer die Schichten darüber nicht neu baut.
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+LABEL org.opencontainers.image.version=${APP_VERSION}
+
 VOLUME ["/data"]
 EXPOSE 8000
 

@@ -24,3 +24,8 @@ TZ = os.environ.get("TZ", "Europe/Berlin")
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "auto").strip().lower()
 
 APP_NAME = "Ebay Watcher"
+REPO_URL = "https://github.com/Serifenlos/EbayWatcher"
+
+# Versionsnummer, z. B. 0.1.3. Setzt GitHub beim Bauen des Images (Datei VERSION + Zähler).
+# Lokal ohne Docker steht hier "dev".
+APP_VERSION = os.environ.get("APP_VERSION", "").strip() or "dev"

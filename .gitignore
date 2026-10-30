@@ -6,6 +6,9 @@
 # macOS
 .DS_Store
 
+# Editor-Einstellungen (VS Code)
+EbayWatcher.code-workspace
+
 # Node-Pakete für CodeKit (Tailwind). Werden über package.json installiert.
 node_modules/
 
@@ -23,3 +26,6 @@ data/
 
 # Alter Stand aus dem Chat, nur zum Nachschlagen
 temp/
+
+# Eigene Notizen, nicht veröffentlichen (auch eine Kopie, die CodeKit in build/ anlegt)
+ReadSimon.*

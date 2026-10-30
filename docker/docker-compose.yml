@@ -1,21 +1,26 @@
-# Portainer: Stacks > Add stack > Web editor. Diesen Inhalt einfügen und
-# unten unter "Environment variables" EBAY_CLIENT_ID, EBAY_CLIENT_SECRET und ADMIN_PASSWORD setzen.
+# Ebay Watcher – Docker Compose
+#
+# Docker Compose: Werte in die Datei .env daneben schreiben (Vorlage: .env.example), dann "docker compose up -d".
+# Portainer: Stacks > Add stack > Web editor, diesen Inhalt einfügen und die Werte unter
+#            "Environment variables" eintragen.
+# Pflicht sind EBAY_CLIENT_ID, EBAY_CLIENT_SECRET und ADMIN_PASSWORD, alles andere hat Standardwerte.
 services:
   ebay-watcher:
-    # Name wie unter github.com/Serifenlos?tab=packages angezeigt (GitHub schreibt ihn klein)
     image: ghcr.io/serifenlos/ebaywatcher:latest
     container_name: ebay-watcher
     restart: unless-stopped
     ports:
       - "8765:8000"
     environment:
-      TZ: Europe/Berlin
       EBAY_CLIENT_ID: ${EBAY_CLIENT_ID}
       EBAY_CLIENT_SECRET: ${EBAY_CLIENT_SECRET}
-      ADMIN_USER: simon
+      ADMIN_USER: ${ADMIN_USER:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      # Benutzer- und Gruppen-ID für den Datenordner (Synology: meist 1026 und 100, per SSH mit "id" prüfen)
-      PUID: "1026"
-      PGID: "100"
+      ADMIN_RESET: ${ADMIN_RESET:-}
+      TZ: ${TZ:-Europe/Berlin}
+      COOKIE_SECURE: ${COOKIE_SECURE:-auto}
+      # Benutzer und Gruppe für den Datenordner (Synology: meist 1026 und 100, per SSH mit "id" prüfen)
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
     volumes:
-      - /volume1/docker/ebay-watcher:/data
+      - ${DATA_PATH:-./data}:/data

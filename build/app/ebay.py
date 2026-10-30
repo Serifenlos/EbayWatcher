@@ -35,7 +35,7 @@ class EbayClient:
     def __init__(self) -> None:
         self._token: str | None = None
         self._token_exp = 0.0
-        self._http = httpx.AsyncClient(timeout=25.0, headers={"User-Agent": "ebay-watcher/1.0"})
+        self._http = httpx.AsyncClient(timeout=25.0, headers={"User-Agent": f"ebay-watcher/{config.APP_VERSION}"})
 
     @property
     def configured(self) -> bool:

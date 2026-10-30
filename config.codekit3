@@ -13,9 +13,9 @@
       "cB" : 0,
       "ft" : 8192,
       "hM" : 0,
-      "oA" : 0,
+      "oA" : 1,
       "oAP" : "\/build\/.gitattributes",
-      "oF" : 0
+      "oF" : 1
     },
     "\/.github" : {
       "ft" : 65536,
@@ -42,6 +42,14 @@
       "oA" : 1,
       "oAP" : "\/build\/docker",
       "oF" : 0
+    },
+    "\/EbayWatcher.code-workspace" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 1,
+      "oAP" : "\/build\/EbayWatcher.code-workspace",
+      "oF" : 1
     },
     "\/node_modules" : {
       "ft" : 65536,
@@ -84,6 +92,25 @@
       "hM" : 0,
       "oA" : 1,
       "oAP" : "\/build\/README.html",
+      "oF" : 1,
+      "oFM" : 0,
+      "oS" : 0,
+      "pHT" : 0,
+      "pME" : 1,
+      "rFN" : 0,
+      "uCM" : 0
+    },
+    "\/ReadSimon.md" : {
+      "cB" : 0,
+      "cS" : 0,
+      "eF" : 1,
+      "eL" : 1,
+      "ema" : 1,
+      "eSQ" : 1,
+      "ft" : 4096,
+      "hM" : 0,
+      "oA" : 1,
+      "oAP" : "\/build\/ReadSimon.html",
       "oF" : 1,
       "oFM" : 0,
       "oS" : 0,
@@ -281,6 +308,20 @@
       "oA" : 2,
       "oAP" : "\/build\/app\/watcher.py",
       "oF" : 1
+    },
+    "\/temp" : {
+      "ft" : 65536,
+      "oA" : 1,
+      "oAP" : "\/build\/temp",
+      "oF" : 0
+    },
+    "\/VERSION" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 1,
+      "oAP" : "\/build\/VERSION",
+      "oF" : 1
     }
   },
   "hooks" : [
@@ -295,7 +336,7 @@
     "displayValueWasSetByUser" : 0,
     "iconImageName" : "brackets-pale",
     "iconImageWasSetByUser" : 0,
-    "lastBuiltDate" : 814388728.03821802
+    "lastBuiltDate" : 815067681.935233
   },
   "projectSettings" : {
     "abortBuildOnError" : 1,

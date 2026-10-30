@@ -1,11 +1,13 @@
 # Ebay Watcher
 
-Ein kleines Web-Tool für die eigene DiskStation. Es überwacht eBay-Gesuche und schickt über ntfy eine Push-Nachricht,
+Ebay Watcher überwacht eBay-Gesuche und schickt über [ntfy](https://ntfy.sh) eine Push-Nachricht aufs Handy,
 
 - wenn eine Auktion kurz vor Ende (Standard: 10 Minuten) noch unter deinem Höchstpreis liegt,
 - wenn ein Sofortkauf-Angebot unter deinem Höchstpreis neu auftaucht.
 
-Es nutzt die offizielle eBay Browse API und läuft als einzelner Docker-Container ohne weitere Dienste.
+Es nutzt die offizielle eBay Browse API und läuft als einzelner Docker-Container ohne weitere Dienste, zum Beispiel auf einem NAS.
+
+> Ebay Watcher ist noch in Entwicklung (Version 0.x). Neue Versionen und Änderungen stehen unter [Releases](https://github.com/Serifenlos/EbayWatcher/releases).
 
 ## Was es kann
 
@@ -16,147 +18,94 @@ Es nutzt die offizielle eBay Browse API und läuft als einzelner Docker-Containe
 - Startseite mit allen Gesuchen als Karten oder Liste, hell oder dunkel nach Systemeinstellung
 - Sicherer Login: Argon2-Passwort-Hash, Sperre nach Fehlversuchen, „Angemeldet bleiben“ für 3 Monate, optional Zwei-Faktor per Authenticator-App, Übersicht und Abmeldung aller Geräte
 
-So arbeitet Ebay Watcher: Das Tool sucht im eingestellten Intervall (Standard 15 Minuten) nach neuen Angeboten und merkt sich jede Auktion mit ihrer Endzeit. Genau X Minuten vor Ende fragt es den aktuellen Preis einmal ab und meldet sich, wenn er unter deinem Limit liegt. Dadurch braucht es nur wenige API-Abfragen.
+So arbeitet Ebay Watcher: Es sucht im eingestellten Intervall (Standard 15 Minuten) nach neuen Angeboten und merkt sich jede Auktion mit ihrer Endzeit. Genau X Minuten vor Ende fragt es den aktuellen Preis einmal ab und meldet sich, wenn er unter deinem Limit liegt. Dadurch braucht es nur wenige API-Abfragen.
 
-## Projektaufbau
+## Voraussetzungen
 
-```
-EbayWatcher/
-├── source/                    ← hier wird gearbeitet
-│   └── app/
-│       ├── *.py               Python-Backend (FastAPI)
-│       ├── templates/         Seiten (Jinja) mit Tailwind-Klassen
-│       │   └── includes/      eingebundene Teile: ui.html (Buttons, Felder, Schalter …), offer.html
-│       └── static/
-│           ├── css/app.css    Tailwind-Quelle: Farben, Schriften, Dunkelmodus
-│           ├── js/app.js
-│           └── favicon.svg
-├── build/                     ← erzeugt CodeKit, nie von Hand ändern
-│   └── app/                   genau das kommt ins Docker-Image
-│       └── static/            css/app-min.css und js/app-min.js sind die fertigen Dateien
-├── docker/                    Dockerfile, docker-compose.yml, requirements.txt …
-├── scripts/check_build.py     prüft, ob build/ zu source/ passt
-├── .github/workflows/         GitHub baut daraus das Image
-├── config.codekit3            CodeKit-Projekt (nur über CodeKit ändern)
-├── package.json               Tailwind-Pakete für CodeKit
-└── postcss.config.mjs         sagt CodeKit, dass Tailwind das CSS übersetzt
-```
+- **Docker mit Docker Compose**, direkt oder über Portainer. Das Image gibt es für x86-64 (`linux/amd64`), nicht für ARM-Geräte wie den Raspberry Pi.
+- **Ein Konto im [eBay Developer Program](https://developer.ebay.com)** mit einem *Production*-Keyset. Daraus brauchst du die **App ID** und die **Cert ID**. Ebay Watcher liest nur öffentliche Suchergebnisse; ein Login mit deinem eBay-Konto ist nicht nötig.
+- **Ein ntfy-Server und die ntfy-App** auf dem Handy. Das kann eine eigene Instanz sein oder der öffentliche Server `https://ntfy.sh`.
+- Ebay Watcher ist auf **eBay.de** ausgelegt: Lieferung nach Deutschland, deutsche Postleitzahlen, Preise in Euro.
 
-Drei Regeln:
+## Installation
 
-1. **Geändert wird nur in `source/`** (und an den Projektdateien außerhalb davon).
-2. **CodeKit spiegelt `source/` nach `build/`.** Python-Dateien und Templates werden unverändert kopiert. `app.css` übersetzt Tailwind zu `app-min.css`, `app.js` wird zu `app-min.js` verkleinert.
-3. **`build/` wird mit committet.** GitHub baut das Docker-Image aus `build/app`, also aus genau dem, was CodeKit erzeugt hat.
-
-Dateinamen mit `_` am Anfang behandelt CodeKit als Teildatei und kopiert sie nicht. Deshalb liegen eingebundene Templates im Ordner `includes/` statt `_ui.html`, und `app/` kommt ohne `__init__.py` aus (Python findet das Paket trotzdem).
-
-## Arbeiten mit CodeKit
-
-### Einmal einrichten
-
-1. **Projektdateien von CodeKit fernhalten.** CodeKit verarbeitet alles im Projektordner, auch Dateien außerhalb von `source/`, und legt sie sonst in `build/` ab.
-   - In den Projekteinstellungen bei den übersprungenen Ordnern (*Skipped Folders*) `/docker`, `/scripts` und `/.github` ergänzen.
-   - In der Dateiliste `README.md`, `package.json`, `.gitignore` (und später `package-lock.json`) auf die Ausgabeaktion *Ignore* stellen.
-2. **Tailwind installieren.** In CodeKit im Bereich *Packages* die Pakete aus `package.json` installieren (oder im Terminal im Projektordner `npm install`). Danach gibt es `node_modules/` (bleibt außerhalb von Git) und `package-lock.json` (kommt ins Repository).
-3. **Autoprefixer für `app.css` ausschalten** (optional). Tailwind ergänzt Browser-Präfixe selbst.
-4. **`build/` nicht ignorieren lassen.** In `.gitignore` darf keine Zeile `build` stehen. Falls CodeKit eine einträgt, die Option dafür in den Projekteinstellungen ausschalten.
-5. **Einmal das ganze Projekt bauen.** Danach liegen in `build/` nur noch der Ordner `app` mit unter anderem `main.py`, `templates/`, `static/css/app-min.css` und `static/js/app-min.js`. Zur Kontrolle im Terminal: `python3 scripts/check_build.py`.
-6. **Repository anlegen.** In GitHub Desktop *Add Local Repository*, den Ordner `EbayWatcher` wählen, das Repository erstellen und veröffentlichen.
-
-### Jede Änderung
-
-1. In `source/` ändern. CodeKit baut die geänderte Datei sofort nach `build/`.
-2. **Neue Tailwind-Klassen in einem Template?** Dann muss auch `app.css` neu übersetzt werden, denn Tailwind erzeugt nur Klassen, die es in den Templates findet. Am sichersten vor jedem Commit einmal das ganze Projekt bauen.
-3. In GitHub Desktop `source/` und `build/` zusammen committen und pushen.
-4. GitHub prüft mit `scripts/check_build.py`, ob `build/` aktuell ist, und baut dann das Image. Fehlt ein Build, bricht die Action mit einer verständlichen Meldung ab.
-5. In Portainer den Stack aktualisieren (siehe [Updates](#updates)).
-
-### Tailwind in diesem Projekt
-
-- **Farben und Größen** stehen als Tokens in `app.css` und heißen nach ihrer Aufgabe: `bg-surface`, `text-muted`, `border-line`, `text-meta`, `rounded-control` …
-- **Dunkelmodus:** `app.css` tauscht nur die Farbwerte aus. In den Templates steht `dark:` nur dort, wo sich mehr als die Farbe ändert.
-- **Karten und Liste:** Die Varianten `view-cards:` und `view-list:` gelten nur in der jeweiligen Ansicht der Übersicht.
-- **Klassen immer ausschreiben.** Tailwind findet nur Klassen, die wörtlich in einer Datei stehen. `{{ 'text-over' if fehler }}` funktioniert, `text-{{ farbe }}` nicht.
-- Wiederkehrende Klassenbündel stehen als Makros in `templates/includes/ui.html`, zum Beispiel `{{ ui.button('primary') }}`.
-
-## Lokal testen (optional)
-
-Mit Python 3.12 auf dem Mac, aus dem Projektordner:
+### Mit Docker Compose
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r docker/requirements.txt
-DATA_DIR=./data EBAY_CLIENT_ID=… EBAY_CLIENT_SECRET=… ADMIN_PASSWORD=test1234test \
-  uvicorn app.main:app --app-dir build --reload --reload-dir build
+mkdir ebay-watcher && cd ebay-watcher
+curl -O https://raw.githubusercontent.com/Serifenlos/EbayWatcher/main/docker/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/Serifenlos/EbayWatcher/main/docker/.env.example
 ```
 
-Dann `http://localhost:8000` öffnen. Gestartet wird aus `build/`, also genau so wie im Container. Die Testdaten landen in `data/` und damit nie im Repository. Wer möchte, trägt in CodeKit `http://localhost:8000` als externen Server ein; dann lädt die CodeKit-Vorschau bei jeder Änderung neu.
+In der Datei `.env` mindestens `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET` und `ADMIN_PASSWORD` eintragen, dann starten:
 
-## Auf der DiskStation einrichten
+```bash
+docker compose up -d
+```
 
-### 1. Image bei GitHub
+Die Datenbank liegt danach im Ordner `data` neben der Compose-Datei.
 
-Bei jedem Push auf `main` baut GitHub Actions automatisch das Docker-Image und legt es unter `ghcr.io/DEIN-GITHUB-NAME/ebay-watcher` ab. Den Fortschritt siehst du im Reiter **Actions**.
+### Mit Portainer
 
-Damit die DiskStation das Image laden kann, gibt es zwei Wege:
+1. Einen Ordner für die Daten anlegen, zum Beispiel `/volume1/docker/ebay-watcher` auf einer Synology.
+2. **Stacks → Add stack**, Name `ebay-watcher`, **Web editor**.
+3. Den Inhalt von [`docker/docker-compose.yml`](docker/docker-compose.yml) einfügen.
+4. Darunter bei **Environment variables** eintragen:
 
-- **Image öffentlich machen** (einfachster Weg, der Code enthält keine Geheimnisse): Auf GitHub unter deinem Profil **Packages** öffnen, `ebay-watcher` wählen, **Package settings**, ganz unten **Change visibility** auf *Public*.
-- **Privat lassen:** In GitHub einen Personal Access Token mit dem Recht `read:packages` erzeugen und in Portainer unter **Registries** eine Registry `ghcr.io` mit deinem GitHub-Namen und diesem Token anlegen.
+   | Name | Wert |
+   | --- | --- |
+   | `EBAY_CLIENT_ID` | App ID (Production) |
+   | `EBAY_CLIENT_SECRET` | Cert ID (Production) |
+   | `ADMIN_PASSWORD` | Passwort für den ersten Login, mindestens 10 Zeichen |
+   | `DATA_PATH` | der Datenordner aus Schritt 1 |
 
-### 2. Datenordner auf der DiskStation anlegen
+   Optional außerdem `ADMIN_USER` (Standard `admin`) sowie `PUID` und `PGID`, siehe [Umgebungsvariablen](#umgebungsvariablen).
+5. **Deploy the stack.**
 
-In der File Station unter `docker` einen Ordner `ebay-watcher` anlegen. Darin liegt später die Datenbank mit deinen Gesuchen und Einstellungen.
+Ist Port 8765 schon belegt, in der Compose-Datei bei `8765:8000` die linke Zahl ändern.
 
-### 3. Stack in Portainer anlegen
+## Erste Schritte
 
-**Stacks**, **Add stack**, Name `ebay-watcher`, **Web editor**. Den Inhalt von `docker/docker-compose.yml` einfügen und `DEIN-GITHUB-NAME` ersetzen.
-
-Darunter bei **Environment variables** drei Variablen anlegen:
-
-| Name | Wert |
-| --- | --- |
-| `EBAY_CLIENT_ID` | App ID aus dem eBay Developer Portal (Production) |
-| `EBAY_CLIENT_SECRET` | Cert ID aus dem eBay Developer Portal (Production) |
-| `ADMIN_PASSWORD` | dein Passwort für den ersten Login |
-
-`PUID` und `PGID` bestimmen, wem der Datenordner gehört. Auf Synology ist der erste Benutzer meist `1026` in der Gruppe `100`. Per SSH zeigt `id` deine Werte.
-
-**Deploy the stack.**
-
-### 4. Anmelden und einrichten
-
-Im Heimnetz oder per WireGuard `http://IP-DEINER-DS:8765` öffnen und mit dem Benutzernamen aus `ADMIN_USER` und deinem Passwort anmelden. Unter **Einstellungen**:
-
-1. Postleitzahl und Umkreis für Abholung eintragen
-2. ntfy-Adresse, Topic und Access-Token eintragen und **Testnachricht senden**
-3. Unter **eBay-Verbindung** auf **Verbindung prüfen** tippen
-
-Danach das erste Gesuch anlegen.
+1. `http://ADRESSE-DEINES-SERVERS:8765` öffnen und mit `ADMIN_USER` und `ADMIN_PASSWORD` anmelden.
+2. Unter **Einstellungen**:
+   - Postleitzahl und Umkreis für Abholung eintragen
+   - ntfy-Adresse, Topic und gegebenenfalls Access-Token eintragen und **Testnachricht senden**
+   - unter **eBay-Verbindung** auf **Verbindung prüfen** tippen
+3. Das erste Gesuch anlegen.
 
 `ADMIN_PASSWORD` wird nur beim allerersten Start verwendet. Später änderst du das Passwort in den Einstellungen.
 
-## Passwort vergessen
-
-Im Portainer-Stack `ADMIN_PASSWORD` auf ein neues Passwort setzen (mindestens 10 Zeichen), zusätzlich `ADMIN_RESET` auf `true` setzen und den Stack aktualisieren. Beim Start wird das Passwort zurückgesetzt, die Zwei-Faktor-Anmeldung ausgeschaltet und alle Geräte werden abgemeldet. Danach `ADMIN_RESET` wieder entfernen.
-
 ## Updates
 
-Änderung wie oben beschrieben bauen, committen und pushen, dann warten, bis die Action durch ist. Dann in Portainer den Stack öffnen, **Update the stack** wählen und dabei das erneute Laden des Images aktivieren. Die Daten im Ordner bleiben erhalten.
+Mit Docker Compose:
 
-## HTTPS
+```bash
+docker compose pull && docker compose up -d
+```
 
-Ebay Watcher muss nicht aus dem Internet erreichbar sein, also keine Portfreigabe in der FritzBox einrichten. Für HTTPS im Heimnetz:
+In Portainer den Stack öffnen, **Update the stack** wählen und dabei das erneute Laden des Images aktivieren.
 
-1. Im DSM-Reverse-Proxy eine Regel anlegen (Quelle: HTTPS, ein eigener Hostname; Ziel: `localhost:8765`)
-2. Ein passendes Zertifikat zuweisen
-3. Ein Profil für die Zugriffskontrolle anlegen, das nur dein Heimnetz und das WireGuard-Netz erlaubt, und es der Regel zuweisen
-4. Den Hostnamen im Pi-hole als lokalen DNS-Eintrag auf die IP der DiskStation zeigen lassen
+Deine Gesuche und Einstellungen bleiben im Datenordner erhalten. Was sich geändert hat, steht unter [Releases](https://github.com/Serifenlos/EbayWatcher/releases). Die laufende Version zeigt Ebay Watcher unter *Einstellungen → Über Ebay Watcher*.
 
-Sobald die Seite per HTTPS aufgerufen wird, setzt Ebay Watcher seine Cookies automatisch mit dem Secure-Flag.
+Welche Version du bekommst, legst du über den Image-Tag in der Compose-Datei fest:
 
-## Datenschutz
+| Tag | Bedeutung |
+| --- | --- |
+| `latest` | immer die neueste Version |
+| `0.1` | die neueste Version aus der Reihe 0.1.x |
+| `0.1.3` | genau diese Version |
 
-Ebay Watcher speichert nur Artikelnummer, Titel, Bild-Link, Preise, Versandkosten, Standort-Land und Endzeit der gefundenen Angebote. Daten über Verkäufer oder Käufer werden nicht gespeichert. Beendete Angebote werden nach sieben Tagen gelöscht.
+## Sicherheit und HTTPS
+
+Ebay Watcher ist für das eigene Heimnetz gedacht. Gib den Port nicht im Router frei; von unterwegs erreichst du ihn am besten per VPN.
+
+Für HTTPS kannst du einen Reverse Proxy davorschalten, etwa den von Synology DSM, Nginx Proxy Manager oder Caddy, mit Ziel `http://SERVER:8765`. Sobald die Seite per HTTPS aufgerufen wird, setzt Ebay Watcher seine Cookies automatisch mit dem Secure-Flag. Am besten erlaubt der Proxy nur Zugriffe aus dem eigenen Netz.
+
+Bei einem öffentlichen ntfy-Server wie `ntfy.sh` kann jeder mitlesen, der den Topic-Namen kennt. Wähle dort einen schwer zu erratenden Namen oder nutze einen eigenen Server mit Access-Token.
+
+## Passwort vergessen
+
+`ADMIN_PASSWORD` auf ein neues Passwort setzen (mindestens 10 Zeichen), zusätzlich `ADMIN_RESET=true` setzen und den Container neu starten (`docker compose up -d` bzw. in Portainer **Update the stack**). Beim Start wird das Passwort zurückgesetzt, die Zwei-Faktor-Anmeldung ausgeschaltet und alle Geräte werden abgemeldet. Danach `ADMIN_RESET` wieder entfernen.
 
 ## Umgebungsvariablen
 
@@ -167,7 +116,12 @@ Ebay Watcher speichert nur Artikelnummer, Titel, Bild-Link, Preise, Versandkoste
 | `ADMIN_USER` | `admin` | Benutzername beim ersten Start |
 | `ADMIN_PASSWORD` | zufällig | Passwort beim ersten Start; fehlt es, steht ein zufälliges im Container-Log |
 | `ADMIN_RESET` | – | `true` setzt beim Start das Passwort auf `ADMIN_PASSWORD` zurück und schaltet 2FA ab |
+| `DATA_PATH` | `./data` | Ordner auf dem Server für die Datenbank (nur in der Compose-Datei) |
+| `PUID` / `PGID` | `1000` | Benutzer und Gruppe, denen der Datenordner gehört. Auf Synology meist `1026` und `100`; per SSH zeigt `id` deine Werte |
 | `TZ` | `Europe/Berlin` | Zeitzone für die Anzeige |
-| `PUID` / `PGID` | `1000` | Besitzer des Datenordners |
-| `COOKIE_SECURE` | `auto` | `true` erzwingt Secure-Cookies, `auto` nur bei HTTPS |
-| `EBAY_MARKETPLACE` | `EBAY_DE` | eBay-Marktplatz |
+| `COOKIE_SECURE` | `auto` | `true` erzwingt Secure-Cookies, `auto` setzt sie nur bei HTTPS |
+
+## Gut zu wissen
+
+- **eBay begrenzt die Abfragen pro Tag** (für die Browse API standardmäßig 5.000). Wie viele heute verbraucht sind, zeigt Ebay Watcher unter *Einstellungen → eBay-Verbindung*. Bei vielen Gesuchen hilft ein längeres Suchintervall.
+- **Datenschutz:** Ebay Watcher speichert nur Artikelnummer, Titel, Bild-Link, Preise, Versandkosten, Standort-Land und Endzeit der gefundenen Angebote. Daten über Verkäufer oder Käufer werden nicht gespeichert. Beendete Angebote werden nach sieben Tagen gelöscht.

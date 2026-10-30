@@ -31,7 +31,7 @@ async def lifespan(_app: FastAPI):
     db.init()
     auth.ensure_admin()
     watcher.start()
-    log.info("Ebay Watcher läuft.")
+    log.info("Ebay Watcher %s läuft.", config.APP_VERSION)
     yield
     await watcher.stop()
 
@@ -61,6 +61,7 @@ def asset(path: str) -> str:
 templates.env.globals.update(
     eur=util.eur, countdown=util.countdown, local_time=util.local_time, ago=util.ago,
     gauge=util.gauge, asset=asset, app_name=config.APP_NAME,
+    app_version=config.APP_VERSION, repo_url=config.REPO_URL,
 )
 
 MESSAGES = {

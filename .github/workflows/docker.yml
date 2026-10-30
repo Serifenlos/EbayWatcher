@@ -1,24 +1,40 @@
 name: Docker-Image bauen
 
+# Bei jedem Push auf main:
+#   1. prüfen, ob build/ zu source/ passt
+#   2. Versionsnummer bestimmen (VERSION + automatischer Zähler, siehe scripts/version.py)
+#   3. Docker-Image bauen und nach ghcr.io hochladen
+#   4. den Commit mit der Version taggen, z. B. v0.1.3
+#   5. ein GitHub-Release mit Changelog anlegen (Text aus den Commit-Nachrichten)
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
-  contents: read
-  packages: write
+  contents: write    # Versions-Tags und Releases anlegen
+  packages: write    # Image nach ghcr.io hochladen
+
+# Nie zwei Läufe gleichzeitig, sonst könnten zwei Builds dieselbe Nummer bekommen.
+concurrency:
+  group: docker-image
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # ganze Historie mit allen Tags, für die Versionsnummer
 
       # Bricht ab, wenn build/ nicht zu source/ passt (in CodeKit nicht neu gebaut).
       - name: build-Ordner prüfen
         run: python3 scripts/check_build.py
+
+      - name: Versionsnummer bestimmen
+        id: version
+        run: python3 scripts/version.py | tee -a "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -28,14 +44,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Image-Tags: latest, 0.1.3 (genau diese Version), 0.1 (neueste 0.1.x), sha-…
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=${{ steps.version.outputs.base }}
             type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=Ebay Watcher
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
 
       - uses: docker/build-push-action@v6
         with:
@@ -43,7 +64,45 @@ jobs:
           file: docker/Dockerfile
           platforms: linux/amd64
           push: true
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Erst nach erfolgreichem Build: Fehlgeschlagene Läufe verbrauchen keine Nummer.
+      - name: Versions-Tag setzen
+        if: steps.version.outputs.new == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Ebay Watcher ${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      # Release mit Changelog aus den Commit-Nachrichten (siehe scripts/release_notes.py).
+      # Auf GitHub lässt es sich danach über „Edit“ von Hand ergänzen.
+      - name: Release veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG gibt es schon."
+          else
+            python3 scripts/release_notes.py "$TAG" > release-notes.md
+            gh release create "$TAG" --verify-tag \
+              --title "Ebay Watcher ${{ steps.version.outputs.version }}" \
+              --notes-file release-notes.md
+          fi
+
+      - name: Zusammenfassung
+        run: |
+          {
+            echo "### Ebay Watcher ${{ steps.version.outputs.version }}"
+            echo ""
+            echo "Image-Tags:"
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
