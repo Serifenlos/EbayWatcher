@@ -68,7 +68,7 @@
 <section class="{{ panel }}" id="durchschnitt">
   <div>
     <h2>Durchschnittspreis</h2>
-    <p class="{{ panel_text }}">Neben jedem Angebot steht der Durchschnitt (Ø) aktueller Sofortkauf-Angebote desselben Produkts. Das sind Angebots-, keine Verkaufspreise.</p>
+    <p class="{{ panel_text }}">Neben jedem Angebot steht der Durchschnitt (Ø) der Sofortkauf-Angebote desselben Produkts. Ebay Watcher merkt sich die Angebote, so wächst der Vergleich mit der Zeit. Das sind Angebots-, keine Verkaufspreise.</p>
   </div>
   <form class="{{ stack }}" method="post" action="/settings/market" novalidate>
     {{ ui.csrf_field(csrf) }}
@@ -87,12 +87,21 @@
         {{ ui.error(errors, 'market_threshold') }}
       </div>
       <div class="grid min-w-0 content-start gap-2">
+        <label class="{{ ui.label() }}" for="market_months">Zeitraum</label>
+        <div class="relative max-w-60">
+          <input class="{{ ui.input('unit') }}" id="market_months" name="market_months" value="{{ s.market_months }}" inputmode="numeric" {% if errors.market_months %}aria-invalid="true"{% endif %}>
+          <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">Monate</span>
+        </div>
+        <p class="{{ ui.hint() }}">So lange zählen Angebote für den Ø mit, auch wenn sie nicht mehr online sind. Höchstens 24 Monate.</p>
+        {{ ui.error(errors, 'market_months') }}
+      </div>
+      <div class="grid min-w-0 content-start gap-2">
         <label class="{{ ui.label() }}" for="market_lookups">Gezielte Abfragen höchstens</label>
         <div class="relative max-w-60">
           <input class="{{ ui.input('unit') }}" id="market_lookups" name="market_lookups" value="{{ s.market_lookups }}" inputmode="numeric" {% if errors.market_lookups %}aria-invalid="true"{% endif %}>
           <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">pro Tag</span>
         </div>
-        <p class="{{ ui.hint() }}">Für Angebote mit Artikel- oder Katalognummer sucht Ebay Watcher gezielt nach Vergleichsangeboten. Jede Antwort gilt 7 Tage, 0 schaltet das ab. Heute: {{ market_lookups_today }}.</p>
+        <p class="{{ ui.hint() }}">Für Angebote mit Artikel- oder Katalognummer sucht Ebay Watcher gezielt nach Vergleichsangeboten und frischt sie wöchentlich auf. 0 schaltet das ab. Heute: {{ market_lookups_today }}.</p>
         {{ ui.error(errors, 'market_lookups') }}
       </div>
     </div>

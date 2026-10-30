@@ -275,7 +275,8 @@ class Watcher:
 
     async def update_market(self, settings: dict) -> None:
         """Holt Vergleichsangebote: zuerst die tägliche Suche je Gesuch, dann gezielte Abfragen für
-        Angebote unter dem Limit, denen noch der Vergleich fehlt (siehe market.py)."""
+        Angebote unter dem Limit – erst die, denen der Vergleich fehlt, dann wöchentlich die übrigen,
+        damit der Preisverlauf weiterwächst (siehe market.py)."""
         if not market.enabled(settings) or time.time() < self._market_next:
             return
         self._market_next = time.time() + MARKET_EVERY
@@ -291,7 +292,7 @@ class Watcher:
                 return
 
         now = time.time()
-        wanted: dict[str, tuple[float, dict, dict]] = {}
+        wanted: dict[str, tuple[int, float, dict, dict]] = {}
         in_use: set[str] = set()
         for s in searches:
             items = db.q("SELECT * FROM items WHERE search_id = ?", (s["id"],))
@@ -302,12 +303,14 @@ class Watcher:
                 if not key:
                     continue
                 in_use.add(key)
-                if key not in wanted and comparison.compare(v) is None and market.due(key, now):
-                    wanted[key] = (v["end_time"] or float("inf"), s, v)   # bald endende Auktionen zuerst
+                if key not in wanted and market.due(key, now):
+                    # Reihenfolge: fehlender Ø vor Auffrischen, bald endende Auktionen zuerst
+                    missing = comparison.compare(v) is None
+                    wanted[key] = (0 if missing else 1, v["end_time"] or float("inf"), s, v)
         market.touch(in_use, now)
 
         budget = min(MARKET_LOOKUPS_PER_RUN, market.daily_lookups(settings) - market.lookups_today())
-        for key, (_end, s, v) in sorted(wanted.items(), key=lambda w: w[1][0])[:max(0, budget)]:
+        for key, (_prio, _end, s, v) in sorted(wanted.items(), key=lambda w: w[1][:2])[:max(0, budget)]:
             if key.startswith("epid:"):
                 await self._fetch_market(key, None, self._lookup_filters(), plz, extra={"epid": key[5:]})
             else:
@@ -323,10 +326,11 @@ class Watcher:
             log.info("Durchschnittspreis %s: %s", key, e)
             market.store(key, None)
             return
+        complete = len(summaries) < market.PAGE_SIZE   # vor dem Filtern: hat eBay alles geliefert?
         excluded = util.exclusion_words(exclude)
         if excluded:
             summaries = [x for x in summaries if not any(w in (x.get("title") or "").lower() for w in excluded)]
-        market.store(key, summaries)
+        market.store(key, summaries, complete=complete)
 
     def _market_filters(self, s: dict) -> list[str]:
         """Wie die Suche des Gesuchs, aber nur Sofortkauf und ohne Höchstpreis."""

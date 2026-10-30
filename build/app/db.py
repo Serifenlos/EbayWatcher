@@ -103,7 +103,8 @@ CREATE TABLE IF NOT EXISTS hidden_items (
     PRIMARY KEY (search_id, item_id)
 );
 
--- Vergleichsangebote für den Durchschnittspreis (siehe market.py).
+-- Vergleichsangebote für den Durchschnittspreis (siehe market.py). Sie bleiben gespeichert, auch wenn
+-- sie nicht mehr online sind, und bilden so über Monate einen Preisverlauf.
 -- key: search:<Gesuch> | epid:<Katalognummer> | nr:<Artikelnummer>
 CREATE TABLE IF NOT EXISTS market_sources (
     key         TEXT PRIMARY KEY,
@@ -119,8 +120,13 @@ CREATE TABLE IF NOT EXISTS market_items (
     epid      TEXT,
     number    TEXT,
     cond      TEXT,
-    price     REAL NOT NULL,
-    shipping  REAL,
+    price       REAL NOT NULL,           -- zuletzt gesehener Preis
+    shipping    REAL,
+    end_time    REAL,                    -- Ende laut eBay, falls bekannt
+    first_seen  REAL NOT NULL,
+    last_seen   REAL NOT NULL,
+    gone_at     REAL,                    -- seitdem nicht mehr online
+    sold        INTEGER NOT NULL DEFAULT 0,   -- vor dem Ende verschwunden, also vermutlich verkauft
     PRIMARY KEY (key, item_id)
 );
 
@@ -144,6 +150,7 @@ DEFAULTS: dict[str, str] = {
     "market_threshold": "15",
     "market_split": "1",
     "market_lookups": "50",
+    "market_months": "6",
 }
 
 _conn: sqlite3.Connection | None = None
@@ -168,6 +175,16 @@ def _migrate() -> None:
     for name in ("epid", "cond"):
         if name not in columns:
             ex(f"ALTER TABLE items ADD COLUMN {name} TEXT")
+    # Durchschnittspreis: aus der Momentaufnahme wird ein Preisverlauf
+    columns = {r["name"] for r in q("PRAGMA table_info(market_items)")}
+    for name, kind in (("end_time", "REAL"), ("first_seen", "REAL"), ("last_seen", "REAL"),
+                       ("gone_at", "REAL"), ("sold", "INTEGER NOT NULL DEFAULT 0")):
+        if name not in columns:
+            ex(f"ALTER TABLE market_items ADD COLUMN {name} {kind}")
+    if "last_seen" not in columns:
+        ex("UPDATE market_items SET first_seen = "
+           "(SELECT fetched_at FROM market_sources s WHERE s.key = market_items.key)")
+        ex("UPDATE market_items SET last_seen = first_seen")
 
 
 def q(sql: str, params: tuple | list = ()) -> list[dict]:

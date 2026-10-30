@@ -598,9 +598,10 @@ async def save_general(request: Request):
 @app.post("/settings/market")
 async def save_market(request: Request):
     form = await checked_form(request)
-    values = {k: str(form.get(k, "")).strip() for k in ("market_threshold", "market_lookups")}
+    values = {k: str(form.get(k, "")).strip() for k in ("market_threshold", "market_lookups", "market_months")}
     errors = {}
-    for key, lo, hi in (("market_threshold", 1, 90), ("market_lookups", 0, 500)):
+    for key, lo, hi in (("market_threshold", 1, 90), ("market_lookups", 0, 500),
+                        ("market_months", 1, market.MAX_MONTHS)):
         if not values[key].isdigit() or not lo <= int(values[key]) <= hi:
             errors[key] = f"Wähle eine Zahl von {lo} bis {hi}."
     values["market_enabled"] = "1" if form.get("market_enabled") else "0"
