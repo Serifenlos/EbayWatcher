@@ -26,6 +26,19 @@ COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "auto").strip().lower()
 APP_NAME = "Ebay Watcher"
 REPO_URL = "https://github.com/Serifenlos/EbayWatcher"
 
-# Versionsnummer, z. B. 0.1.3. Setzt GitHub beim Bauen des Images (Datei VERSION + Zähler).
-# Lokal ohne Docker steht hier "dev".
-APP_VERSION = os.environ.get("APP_VERSION", "").strip() or "dev"
+
+def _app_version() -> str:
+    """Versionsnummer, z. B. 0.1.3. GitHub schreibt sie beim Bauen des Images in die Datei
+    /srv/APP_VERSION (Datei VERSION + Zähler, siehe scripts/version.py). Lokal ohne Docker gibt
+    es die Datei nicht, dann steht hier "dev".
+
+    Bewusst eine Datei und keine Umgebungsvariable: Portainer übernimmt beim Neuerstellen eines
+    Containers dessen alte Umgebungsvariablen, dann bliebe nach einem Update die alte Nummer stehen."""
+    try:
+        version_file = Path(__file__).resolve().parent.parent / "APP_VERSION"
+        return version_file.read_text(encoding="utf-8").strip() or "dev"
+    except OSError:
+        return "dev"
+
+
+APP_VERSION = _app_version()

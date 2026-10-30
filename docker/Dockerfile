@@ -27,8 +27,10 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
 
 # Versionsnummer, übergibt GitHub beim Bauen (siehe VERSION und scripts/version.py).
 # Steht bewusst hier unten, damit eine neue Nummer die Schichten darüber nicht neu baut.
+# Sie landet in einer Datei und nicht in einer Umgebungsvariable: Portainer übernimmt beim
+# Neuerstellen eines Containers die alten Umgebungsvariablen, dann bliebe die alte Nummer stehen.
 ARG APP_VERSION=dev
-ENV APP_VERSION=${APP_VERSION}
+RUN printf '%s\n' "${APP_VERSION}" > /srv/APP_VERSION
 LABEL org.opencontainers.image.version=${APP_VERSION}
 
 VOLUME ["/data"]
