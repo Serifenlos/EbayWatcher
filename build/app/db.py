@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS items (
     pickup          INTEGER NOT NULL DEFAULT 0,
     pickup_only     INTEGER NOT NULL DEFAULT 0,
     distance_km     REAL,
+    epid            TEXT,                              -- Produkt im eBay-Katalog, falls verknüpft
+    cond            TEXT,                              -- new | used | parts (für den Durchschnittspreis)
     first_seen      REAL NOT NULL,
     last_seen       REAL NOT NULL,
     status          TEXT NOT NULL DEFAULT 'active',   -- active | dropped | ended | gone
@@ -101,6 +103,27 @@ CREATE TABLE IF NOT EXISTS hidden_items (
     PRIMARY KEY (search_id, item_id)
 );
 
+-- Vergleichsangebote für den Durchschnittspreis (siehe market.py).
+-- key: search:<Gesuch> | epid:<Katalognummer> | nr:<Artikelnummer>
+CREATE TABLE IF NOT EXISTS market_sources (
+    key         TEXT PRIMARY KEY,
+    fetched_at  REAL NOT NULL,
+    ok          INTEGER NOT NULL DEFAULT 1,
+    last_used   REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS market_items (
+    key       TEXT NOT NULL REFERENCES market_sources(key) ON DELETE CASCADE,
+    item_id   TEXT NOT NULL,
+    title     TEXT,
+    epid      TEXT,
+    number    TEXT,
+    cond      TEXT,
+    price     REAL NOT NULL,
+    shipping  REAL,
+    PRIMARY KEY (key, item_id)
+);
+
 CREATE TABLE IF NOT EXISTS api_usage (
     day    TEXT PRIMARY KEY,
     calls  INTEGER NOT NULL DEFAULT 0
@@ -116,6 +139,11 @@ DEFAULTS: dict[str, str] = {
     "ntfy_topic": "",
     "ntfy_token": "",
     "app_url": "",
+    # Durchschnittspreis (market.py)
+    "market_enabled": "1",
+    "market_threshold": "15",
+    "market_split": "1",
+    "market_lookups": "50",
 }
 
 _conn: sqlite3.Connection | None = None
@@ -131,6 +159,15 @@ def init() -> None:
     _conn.execute("PRAGMA foreign_keys=ON")
     _conn.execute("PRAGMA busy_timeout=5000")
     _conn.executescript(SCHEMA)
+    _migrate()
+
+
+def _migrate() -> None:
+    """Spalten, die nach der ersten Version dazugekommen sind, in bestehenden Datenbanken ergänzen."""
+    columns = {r["name"] for r in q("PRAGMA table_info(items)")}
+    for name in ("epid", "cond"):
+        if name not in columns:
+            ex(f"ALTER TABLE items ADD COLUMN {name} TEXT")
 
 
 def q(sql: str, params: tuple | list = ()) -> list[dict]:

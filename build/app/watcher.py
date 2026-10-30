@@ -4,6 +4,7 @@ Zwei getrennte Abläufe:
 * Entdecken: jedes aktive Gesuch wird im eingestellten Intervall nach neuen Angeboten durchsucht.
 * Endspurt: jede gemerkte Auktion wird genau einmal X Minuten vor ihrem Ende geprüft.
 Sofortkauf-Angebote unter dem Limit werden direkt beim Entdecken gemeldet.
+Dazu alle paar Minuten: Vergleichsangebote für den Durchschnittspreis holen (market.py).
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ import contextlib
 import logging
 import time
 
-from . import db, images, notify, util
+from . import db, images, market, notify, util
 from .ebay import EbayClient, EbayError
 
 log = logging.getLogger("ebay-watcher")
@@ -21,11 +22,13 @@ TICK_SECONDS = 30
 MAX_SINGLE_PUSHES = 5          # mehr neue Sofortkauf-Treffer auf einmal -> eine Sammelnachricht
 PICKUP_RADIUS_ALL_KM = 1000    # Abholmodus "alle anzeigen": praktisch ganz Deutschland
 MAX_END_LOOKUPS = 15           # fehlende Endzeiten pro Lauf über getItem nachladen
+MARKET_EVERY = 300             # Durchschnittspreis: alle 5 Minuten nachsehen, ob etwas zu holen ist …
+MARKET_LOOKUPS_PER_RUN = 3     # … und dann höchstens so viele gezielte Abfragen auf einmal
 
 ITEM_FIELDS = [
     "title", "url", "image", "is_auction", "has_bin", "price", "bin_price", "currency",
     "shipping", "shipping_known", "bid_count", "end_time", "country", "location_text",
-    "pickup", "pickup_only", "distance_km",
+    "pickup", "pickup_only", "distance_km", "epid", "cond",
 ]
 FORMATS = {"auction": ["AUCTION"], "fixed": ["FIXED_PRICE"], "both": ["AUCTION", "FIXED_PRICE"]}
 
@@ -38,6 +41,7 @@ class Watcher:
         self.last_tick: float | None = None
         self.last_ebay_check: dict | None = None
         self.last_ntfy_error: str | None = None
+        self._market_next = 0.0
 
     # ------------------------------------------------------------ Lebenszyklus
 
@@ -82,6 +86,7 @@ class Watcher:
             if s["last_run"] is None or time.time() - s["last_run"] >= interval:
                 await self.discover(s, settings)
                 await self.check_endings(settings)
+        await self.update_market(settings)
 
     # ------------------------------------------------------------ Entdecken
 
@@ -239,7 +244,7 @@ class Watcher:
                 fresh["shipping"], fresh["shipping_known"] = 0.0, 1
             elif not fresh["shipping_known"] and row["shipping_known"]:
                 fresh["shipping"], fresh["shipping_known"] = row["shipping"], 1
-            for field in ("end_time", "image", "url", "title"):
+            for field in ("end_time", "image", "url", "title", "epid", "cond"):
                 if not fresh[field]:
                     fresh[field] = row[field]
             self._update_item(s["id"], row["item_id"], fresh, time.time(), reset_end=False)
@@ -265,6 +270,77 @@ class Watcher:
                 "UPDATE items SET end_checked = 1, notified_end = ? WHERE search_id = ? AND item_id = ?",
                 (1 if view["within"] else 0, *key),
             )
+
+    # ------------------------------------------------------------ Durchschnittspreis
+
+    async def update_market(self, settings: dict) -> None:
+        """Holt Vergleichsangebote: zuerst die tägliche Suche je Gesuch, dann gezielte Abfragen für
+        Angebote unter dem Limit, denen noch der Vergleich fehlt (siehe market.py)."""
+        if not market.enabled(settings) or time.time() < self._market_next:
+            return
+        self._market_next = time.time() + MARKET_EVERY
+        market.prune()
+        plz = (settings.get("plz") or "").strip()
+        searches = db.q("SELECT * FROM searches WHERE active = 1 AND last_run IS NOT NULL ORDER BY id")
+
+        for s in searches:   # höchstens eine Gesuch-Suche pro Durchgang, nur wenn es Angebote gibt
+            key = market.search_key(s["id"])
+            has_items = db.q1("SELECT 1 AS x FROM items WHERE search_id = ? AND status = 'active' LIMIT 1", (s["id"],))
+            if has_items and market.due(key):
+                await self._fetch_market(key, s["query"], self._market_filters(s), plz, s["exclude"])
+                return
+
+        now = time.time()
+        wanted: dict[str, tuple[float, dict, dict]] = {}
+        in_use: set[str] = set()
+        for s in searches:
+            items = db.q("SELECT * FROM items WHERE search_id = ?", (s["id"],))
+            views = util.search_overview(s, items, now, db.hidden_ids(s["id"]))["matches"]
+            comparison = market.Comparison(s, settings, views)
+            for v in views:
+                key = market.lookup_key(v)
+                if not key:
+                    continue
+                in_use.add(key)
+                if key not in wanted and comparison.compare(v) is None and market.due(key, now):
+                    wanted[key] = (v["end_time"] or float("inf"), s, v)   # bald endende Auktionen zuerst
+        market.touch(in_use, now)
+
+        budget = min(MARKET_LOOKUPS_PER_RUN, market.daily_lookups(settings) - market.lookups_today())
+        for key, (_end, s, v) in sorted(wanted.items(), key=lambda w: w[1][0])[:max(0, budget)]:
+            if key.startswith("epid:"):
+                await self._fetch_market(key, None, self._lookup_filters(), plz, extra={"epid": key[5:]})
+            else:
+                brand = (s["query"].split() or [""])[0]
+                number = market.raw_number(v["title"], key[3:])
+                await self._fetch_market(key, f"{brand} {number}".strip(), self._lookup_filters(), plz)
+
+    async def _fetch_market(self, key: str, q: str | None, filters: list[str], plz: str,
+                            exclude: str = "", extra: dict | None = None) -> None:
+        try:
+            summaries = await self.ebay.search(q, filters, None, plz, max_pages=1, extra=extra)
+        except EbayError as e:
+            log.info("Durchschnittspreis %s: %s", key, e)
+            market.store(key, None)
+            return
+        excluded = util.exclusion_words(exclude)
+        if excluded:
+            summaries = [x for x in summaries if not any(w in (x.get("title") or "").lower() for w in excluded)]
+        market.store(key, summaries)
+
+    def _market_filters(self, s: dict) -> list[str]:
+        """Wie die Suche des Gesuchs, aber nur Sofortkauf und ohne Höchstpreis."""
+        filters = ["priceCurrency:EUR", "buyingOptions:{FIXED_PRICE}", "deliveryCountry:DE", self._location_filter(s)]
+        if s["condition"] == "new":
+            filters.append("conditions:{NEW}")
+        elif s["condition"] == "used":
+            filters.append("conditions:{USED}")
+        return filters
+
+    @staticmethod
+    def _lookup_filters() -> list[str]:
+        """Gezielte Abfragen gelten für alle Gesuche: Sofortkauf aus Deutschland, jeder Zustand."""
+        return ["priceCurrency:EUR", "buyingOptions:{FIXED_PRICE}", "deliveryCountry:DE", "itemLocationCountry:DE"]
 
     # ------------------------------------------------------------ Nachrichten
 
@@ -329,12 +405,20 @@ class Watcher:
             return f"{line}, Versand kostenlos"
         return line
 
+    @staticmethod
+    def _market_line(s: dict, v: dict, settings: dict) -> list[str]:
+        if not market.enabled(settings):
+            return []
+        m = market.Comparison(s, settings, [v]).compare(v)
+        return [f"Ø {util.eur(m['median'])} ({m['delta_text']})"] if m else []
+
     def _auction_push(self, s: dict, v: dict, settings: dict) -> dict:
         minutes = max(1, round((v["ends_in"] or 0) / 60))
         bids = v["bid_count"] or 0
         lines = [
             util.short(v["title"], 120),
             f"{self._price_line(v, 'Aktuell')}, {bids} {'Gebot' if bids == 1 else 'Gebote'}",
+            *self._market_line(s, v, settings),
             util.limit_text(s),
             *v["flags"],
         ]
@@ -349,7 +433,8 @@ class Watcher:
         }
 
     def _fixed_push(self, s: dict, v: dict, settings: dict) -> dict:
-        lines = [util.short(v["title"], 120), self._price_line(v, "Preis"), util.limit_text(s), *v["flags"]]
+        lines = [util.short(v["title"], 120), self._price_line(v, "Preis"), *self._market_line(s, v, settings),
+                 util.limit_text(s), *v["flags"]]
         return {
             "title": f"Sofortkauf unter Limit: {util.short(s['name'] or s['query'], 40)}",
             "message": "\n".join(lines),

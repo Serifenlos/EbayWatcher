@@ -65,6 +65,41 @@
   </form>
 </section>
 
+<section class="{{ panel }}" id="durchschnitt">
+  <div>
+    <h2>Durchschnittspreis</h2>
+    <p class="{{ panel_text }}">Neben jedem Angebot steht der Durchschnitt (Ø) aktueller Sofortkauf-Angebote desselben Produkts. Das sind Angebots-, keine Verkaufspreise.</p>
+  </div>
+  <form class="{{ stack }}" method="post" action="/settings/market" novalidate>
+    {{ ui.csrf_field(csrf) }}
+    <div class="grid">
+      {{ ui.switch('market_enabled', 'Durchschnittspreis anzeigen', 'Kostet pro Gesuch eine eBay-Abfrage am Tag.', s.market_enabled == '1') }}
+      {{ ui.switch('market_split', 'Neu und gebraucht getrennt vergleichen', 'Gebrauchte Angebote nur mit gebrauchten, neue nur mit neuen.', s.market_split == '1') }}
+    </div>
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-5">
+      <div class="grid min-w-0 content-start gap-2">
+        <label class="{{ ui.label() }}" for="market_threshold">Grün markieren ab</label>
+        <div class="relative max-w-60">
+          <input class="{{ ui.input('unit') }}" id="market_threshold" name="market_threshold" value="{{ s.market_threshold }}" inputmode="numeric" {% if errors.market_threshold %}aria-invalid="true"{% endif %}>
+          <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">% unter Ø</span>
+        </div>
+        <p class="{{ ui.hint() }}">Dann wird die Abweichung grün. Genauso weit über dem Ø wird sie bernsteinfarben.</p>
+        {{ ui.error(errors, 'market_threshold') }}
+      </div>
+      <div class="grid min-w-0 content-start gap-2">
+        <label class="{{ ui.label() }}" for="market_lookups">Gezielte Abfragen höchstens</label>
+        <div class="relative max-w-60">
+          <input class="{{ ui.input('unit') }}" id="market_lookups" name="market_lookups" value="{{ s.market_lookups }}" inputmode="numeric" {% if errors.market_lookups %}aria-invalid="true"{% endif %}>
+          <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">pro Tag</span>
+        </div>
+        <p class="{{ ui.hint() }}">Für Angebote mit Artikel- oder Katalognummer sucht Ebay Watcher gezielt nach Vergleichsangeboten. Jede Antwort gilt 7 Tage, 0 schaltet das ab. Heute: {{ market_lookups_today }}.</p>
+        {{ ui.error(errors, 'market_lookups') }}
+      </div>
+    </div>
+    <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button('primary') }}" type="submit">Speichern</button></div>
+  </form>
+</section>
+
 <section class="{{ panel }}" id="benachrichtigungen">
   <div>
     <h2>Benachrichtigungen</h2>

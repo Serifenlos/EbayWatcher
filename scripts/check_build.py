@@ -80,7 +80,7 @@ def main() -> int:
     for entry in sorted(BUILD.iterdir()):
         if entry.name == ".gitignore":
             problems.append("build/.gitignore schließt build/ von Git aus (CodeKit-Option „Build-Ordner in Git ignorieren“ ausschalten)")
-        elif entry.name not in ("app", ".DS_Store"):
+        elif entry.name not in ("app", ".DS_Store", "Claude outputs"):   # Claude outputs steht in .gitignore
             problems.append(f"gehört nicht in build/ (in CodeKit ignorieren): {entry.name}{'/' if entry.is_dir() else ''}")
 
     if problems:

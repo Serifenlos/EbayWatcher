@@ -89,12 +89,16 @@ class EbayClient:
             return r
         return r
 
-    async def search(self, q: str, filters: list[str], sort: str | None = None,
-                     plz: str = "", max_pages: int = 3) -> list[dict]:
+    async def search(self, q: str | None, filters: list[str], sort: str | None = None,
+                     plz: str = "", max_pages: int = 3, extra: dict | None = None) -> list[dict]:
+        """Angebotssuche. extra: weitere Parameter, z. B. {"epid": …} für ein Produkt aus dem eBay-Katalog
+        (dann ohne Suchbegriff)."""
         items: list[dict] = []
         offset = 0
         for _ in range(max_pages):
-            params = {"q": q, "filter": ",".join(filters), "limit": "200", "offset": str(offset)}
+            params = {"filter": ",".join(filters), "limit": "200", "offset": str(offset), **(extra or {})}
+            if q:
+                params["q"] = q
             if sort:
                 params["sort"] = sort
             r = await self._get("/buy/browse/v1/item_summary/search", params, plz)

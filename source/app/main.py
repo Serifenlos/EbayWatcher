@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, config, db, images, notify, util
+from . import auth, config, db, images, market, notify, util
 from .watcher import Watcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -86,6 +86,7 @@ MESSAGES = {
     "sessions": "Alle anderen Geräte sind abgemeldet.",
     "ebay": "Verbindung zu eBay geprüft.",
     "hidden": "Angebot ausgeblendet.",
+    "market": "Gespeichert. Neue Vergleichsangebote holt Ebay Watcher in den nächsten Minuten.",
     "unhidden": "Angebot wieder eingeblendet.",
     "logout": "Du bist abgemeldet.",
 }
@@ -441,6 +442,10 @@ async def search_detail(request: Request, sid: int):
     now = time.time()
     overview = util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (sid,)), now,
                                     db.hidden_ids(sid))
+    settings = db.get_settings()
+    market.attach(overview, settings, overview["matches"])
+    if request.query_params.get("show") == "over":
+        market.attach(overview, settings, overview["over"])
     # Ohne JavaScript lassen sich die eingeklappten Listen über ?show=over bzw. ?show=hidden aufklappen
     show = request.query_params.get("show")
     hidden = _hidden_views(s, now) if show == "hidden" else []
@@ -466,6 +471,7 @@ async def search_list(request: Request, sid: int, kind: str):
     if kind == "over":
         offers = util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (sid,)), now,
                                       db.hidden_ids(sid))["over"]
+        market.attach(s, db.get_settings(), offers)
     else:
         offers = _hidden_views(s, now)
     return render(request, "includes/offer_list.html", offers=offers, kind=kind, sid=sid, now=now)
@@ -515,6 +521,7 @@ async def update_search(request: Request, sid: int):
         "last_error = NULL WHERE id = ?",
         [*[values[c] for c in SEARCH_COLUMNS], sid],
     )
+    market.forget_search(sid)   # Suchbegriff oder Filter können sich geändert haben
     watcher.poke()
     return back(f"/searches/{sid}", "updated")
 
@@ -561,7 +568,7 @@ def _settings_page(request: Request, errors: dict | None = None, values: dict | 
                   errors=errors or {}, sessions=sessions, ebay_configured=watcher.ebay.configured,
                   ebay_check=watcher.last_ebay_check, ntfy_error=watcher.last_ntfy_error,
                   api_calls=db.api_calls_today(), has_token=bool(s.get("ntfy_token")),
-                  image_cache=images.stats())
+                  image_cache=images.stats(), market_lookups_today=market.lookups_today())
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -586,6 +593,23 @@ async def save_general(request: Request):
     db.set_settings(values)
     watcher.poke()
     return back("/settings", "saved", anchor="standort")
+
+
+@app.post("/settings/market")
+async def save_market(request: Request):
+    form = await checked_form(request)
+    values = {k: str(form.get(k, "")).strip() for k in ("market_threshold", "market_lookups")}
+    errors = {}
+    for key, lo, hi in (("market_threshold", 1, 90), ("market_lookups", 0, 500)):
+        if not values[key].isdigit() or not lo <= int(values[key]) <= hi:
+            errors[key] = f"Wähle eine Zahl von {lo} bis {hi}."
+    values["market_enabled"] = "1" if form.get("market_enabled") else "0"
+    values["market_split"] = "1" if form.get("market_split") else "0"
+    if errors:
+        return _settings_page(request, errors, values, 422)
+    db.set_settings(values)
+    watcher.poke()
+    return back("/settings", "market", anchor="durchschnitt")
 
 
 @app.post("/settings/ntfy")

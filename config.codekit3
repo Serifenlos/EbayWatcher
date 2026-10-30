@@ -37,6 +37,12 @@
       "oAP" : "\/build\/build",
       "oF" : 0
     },
+    "\/Claude outputs" : {
+      "ft" : 65536,
+      "oA" : 1,
+      "oAP" : "\/build\/Claude outputs",
+      "oF" : 0
+    },
     "\/docker" : {
       "ft" : 65536,
       "oA" : 1,
@@ -171,6 +177,14 @@
       "hM" : 0,
       "oA" : 2,
       "oAP" : "\/build\/app\/main.py",
+      "oF" : 1
+    },
+    "\/source\/app\/market.py" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 2,
+      "oAP" : "\/build\/app\/market.py",
       "oF" : 1
     },
     "\/source\/app\/notify.py" : {
@@ -352,7 +366,7 @@
     "displayValueWasSetByUser" : 0,
     "iconImageName" : "brackets-pale",
     "iconImageWasSetByUser" : 0,
-    "lastBuiltDate" : 815088418.44125497
+    "lastBuiltDate" : 815091655.09339404
   },
   "projectSettings" : {
     "abortBuildOnError" : 1,
@@ -1656,7 +1670,7 @@
     "rollupTreeshakingEnabled" : 1,
     "rollupTreeshakingModuleSideEffects" : 1,
     "sassWarningStyle" : 1,
-    "skippedFoldersString" : "\/temp,\/storage\/framework\/sessions,node_modules,_logs,logs,log,.idea,_cache,cache,\/docker,\/scripts,\/.github",
+    "skippedFoldersString" : "\/temp,\/storage\/framework\/sessions,\/scripts,node_modules,_logs,logs,log,.idea,\/.github,\/docker,\/Claude outputs,\/\"Claude outputs\",_cache,cache,\/Claude\\ outputs",
     "sourceFolderName" : "source",
     "susyVersion" : 3,
     "tsAllowArbitraryExtensions" : 0,

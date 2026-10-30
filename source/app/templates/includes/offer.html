@@ -2,6 +2,7 @@
   Ein Angebot in einer Liste auf der Detailseite.
   Erwartet: v (Angebot), sid (Gesuch), kind ("matches", "over" oder "hidden"), csrf, now
   Die data-sort-…-Attribute nutzt das Sortieren im Browser (app.js).
+  v.market: Durchschnittspreis aus market.py (fehlt, wenn es nicht genug Vergleich gibt).
 #}
 {% import "includes/ui.html" as ui %}
 <li class="flex items-start gap-2 border-b border-line md:items-center {{ 'opacity-70' if kind == 'over' }}"
@@ -26,6 +27,13 @@
       {% if v.show_shipping %}<span class="text-meta text-muted">{{ eur(v.rel_price) }} + {{ eur(v.shipping) }} Versand</span>
       {% elif v.shipping_known and not v.shipping and not v.pickup_only %}<span class="text-meta text-muted">Versand kostenlos</span>{% endif %}
       {{ ui.limit_line(v.ratio, 'max-w-45') }}
+      {% if v.market %}{% set m = v.market %}
+      <span class="flex items-center gap-1.5 text-meta text-muted md:justify-end" title="{{ m.hint }}">
+        <span aria-hidden="true">Ø</span><span class="sr-only">Durchschnittspreis</span>
+        <span class="{{ ui.num() }}">{{ eur(m.median) }}</span>
+        <span data-tone="{{ m.tone }}" class="{{ ui.num() }} rounded-full bg-tile px-1.75 text-[12.5px] leading-5 font-semibold text-ink-2 data-[tone=good]:bg-accent-soft data-[tone=good]:text-accent data-[tone=high]:bg-over-soft data-[tone=high]:text-tight">{{ m.delta_text }}</span>
+      </span>
+      {% endif %}
       {% endif %}
       {% if v.auction and v.end_time %}<span class="text-meta text-muted">Endet in {{ ui.countdown_span(v.end_time, now) }}</span>{% endif %}
     </span>

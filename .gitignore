@@ -29,3 +29,6 @@ temp/
 
 # Eigene Notizen, nicht veröffentlichen (auch eine Kopie, die CodeKit in build/ anlegt)
 ReadSimon.*
+
+# Dateien, die die Claude-App aus dem Chat in den Projektordner legt (Screenshots, Entwürfe)
+Claude outputs/

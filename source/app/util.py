@@ -145,6 +145,17 @@ def _iso_ts(text: str | None) -> float | None:
         return None
 
 
+def condition_class(condition_id: object) -> str | None:
+    """eBay-Zustandsnummer → new | used | parts. Generalüberholt zählt als gebraucht."""
+    try:
+        cid = int(condition_id)
+    except (TypeError, ValueError):
+        return None
+    if cid in (1000, 1500, 1750):
+        return "new"
+    return "parts" if cid == 7000 else "used"
+
+
 def parse_listing(d: dict, pickup: bool = False) -> dict:
     """Wandelt eine eBay item_summary- oder getItem-Antwort in unser Format um.
     Verkäuferdaten werden absichtlich nicht übernommen."""
@@ -207,6 +218,8 @@ def parse_listing(d: dict, pickup: bool = False) -> dict:
         "pickup": int(pickup),
         "pickup_only": pickup_only,
         "distance_km": distance,
+        "epid": d.get("epid") or None,
+        "cond": condition_class(d.get("conditionId")),
     }
 
 
