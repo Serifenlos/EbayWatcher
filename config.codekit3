@@ -157,6 +157,14 @@
       "oAP" : "\/build\/app\/ebay.py",
       "oF" : 1
     },
+    "\/source\/app\/images.py" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 2,
+      "oAP" : "\/build\/app\/images.py",
+      "oF" : 1
+    },
     "\/source\/app\/main.py" : {
       "cB" : 0,
       "ft" : 8192,
@@ -344,7 +352,7 @@
     "displayValueWasSetByUser" : 0,
     "iconImageName" : "brackets-pale",
     "iconImageWasSetByUser" : 0,
-    "lastBuiltDate" : 815086101.19839501
+    "lastBuiltDate" : 815087535.22389996
   },
   "projectSettings" : {
     "abortBuildOnError" : 1,

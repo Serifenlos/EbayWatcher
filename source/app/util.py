@@ -271,7 +271,6 @@ def item_view(item: dict, search: dict, now: float) -> dict:
         "within": within_limit(item, search),
         "flags": item_flags(item),
         "show_shipping": bool(search["incl_shipping"] and item["shipping_known"] and item["shipping"]),
-        "image_large": large_image(item.get("image")),
         "ends_in": (item["end_time"] - now) if item.get("end_time") else None,
     }
 
@@ -317,8 +316,8 @@ def hidden_view(row: dict, item: dict | None, search: dict, now: float) -> dict:
             view["end_time"] = None
     else:
         view = {
-            "item_id": row["item_id"], "title": row["title"] or "", "url": row["url"] or "",
-            "image": row["image"], "image_large": large_image(row["image"]), "kind": "Beendet",
+            "search_id": row["search_id"], "item_id": row["item_id"], "title": row["title"] or "",
+            "url": row["url"] or "", "image": row["image"], "kind": "Beendet",
             "auction": False, "total": None, "rel_price": None, "ratio": 0.0, "within": False,
             "flags": [], "show_shipping": False, "shipping_known": 0, "shipping": None,
             "pickup_only": 0, "bid_count": None, "location_text": "", "end_time": None,

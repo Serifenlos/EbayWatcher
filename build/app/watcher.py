@@ -12,7 +12,7 @@ import contextlib
 import logging
 import time
 
-from . import db, notify, util
+from . import db, images, notify, util
 from .ebay import EbayClient, EbayError
 
 log = logging.getLogger("ebay-watcher")
@@ -72,6 +72,7 @@ class Watcher:
     async def tick(self) -> None:
         self.last_tick = time.time()
         db.prune()
+        images.cleanup_if_due()
         if not self.ebay.configured:
             return
         settings = db.get_settings()
@@ -296,9 +297,21 @@ class Watcher:
             db.ex("UPDATE items SET notified_bin = 1 WHERE search_id = ? AND item_id = ?", (s["id"], v["item_id"]))
 
     @staticmethod
-    def _app_link(settings: dict, s: dict) -> str | None:
-        base = (settings.get("app_url") or "").strip().rstrip("/")
+    def _app_base(settings: dict) -> str:
+        return (settings.get("app_url") or "").strip().rstrip("/")
+
+    def _app_link(self, settings: dict, s: dict) -> str | None:
+        base = self._app_base(settings)
         return f"{base}/searches/{s['id']}" if base else None
+
+    def _image(self, settings: dict, s: dict, v: dict) -> str | None:
+        """Bild für die Benachrichtigung: aus dem eigenen Bild-Cache, wenn die Adresse von
+        Ebay Watcher eingetragen ist (das Handy muss sie erreichen), sonst direkt von eBay."""
+        base = self._app_base(settings)
+        path = images.url(s["id"], v["item_id"], v["image"])
+        if base and path:
+            return base + path
+        return util.large_image(v["image"])
 
     def _actions(self, settings: dict, s: dict, v: dict) -> list[dict]:
         actions = [{"action": "view", "label": "Bei eBay öffnen", "url": v["url"], "clear": True}]
@@ -329,7 +342,7 @@ class Watcher:
             "title": f"Noch {minutes} Min: {util.short(s['name'] or s['query'], 40)}",
             "message": "\n".join(lines),
             "click": v["url"],
-            "image": util.large_image(v["image"]),
+            "image": self._image(settings, s, v),
             "priority": 5,
             "tags": ["hourglass_flowing_sand"],
             "actions": self._actions(settings, s, v),
@@ -341,7 +354,7 @@ class Watcher:
             "title": f"Sofortkauf unter Limit: {util.short(s['name'] or s['query'], 40)}",
             "message": "\n".join(lines),
             "click": v["url"],
-            "image": util.large_image(v["image"]),
+            "image": self._image(settings, s, v),
             "priority": 4,
             "tags": ["shopping_cart"],
             "actions": self._actions(settings, s, v),

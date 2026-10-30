@@ -125,4 +125,5 @@ Bei einem öffentlichen ntfy-Server wie `ntfy.sh` kann jeder mitlesen, der den T
 ## Gut zu wissen
 
 - **eBay begrenzt die Abfragen pro Tag** (für die Browse API standardmäßig 5.000). Wie viele heute verbraucht sind, zeigt Ebay Watcher unter *Einstellungen → eBay-Verbindung*. Bei vielen Gesuchen hilft ein längeres Suchintervall.
-- **Datenschutz:** Ebay Watcher speichert nur Artikelnummer, Titel, Bild-Link, Preise, Versandkosten, Standort-Land und Endzeit der gefundenen Angebote. Daten über Verkäufer oder Käufer werden nicht gespeichert. Beendete Angebote werden nach sieben Tagen gelöscht.
+- **Bilder:** Jedes Artikelbild lädt Ebay Watcher nur einmal bei eBay und speichert es im Datenordner unter `cache/bilder`. Bilder, die 14 Tage nicht angezeigt wurden, löscht es von selbst, und insgesamt belegt der Ordner höchstens etwa 200 MB. Ist unter *Einstellungen → Standort und Suche* die **Adresse von Ebay Watcher** eingetragen, kommen auch die Bilder in den Benachrichtigungen aus diesem Cache. Das Handy muss diese Adresse dann erreichen können, sonst fehlt das Bild in der Benachrichtigung.
+- **Datenschutz:** Ebay Watcher speichert nur Artikelnummer, Titel, Artikelbild, Preise, Versandkosten, Standort-Land und Endzeit der gefundenen Angebote. Daten über Verkäufer oder Käufer werden nicht gespeichert. Beendete Angebote werden nach sieben Tagen gelöscht.

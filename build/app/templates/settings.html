@@ -58,7 +58,7 @@
     <div class="grid min-w-0 gap-2">
       <label class="{{ ui.label() }}" for="app_url">Adresse von Ebay Watcher <span class="font-normal text-muted">optional</span></label>
       <input class="{{ ui.input() }}" id="app_url" name="app_url" value="{{ s.app_url }}" placeholder="http://192.168.178.20:8765" autocomplete="off" {% if errors.app_url %}aria-invalid="true"{% endif %}>
-      <p class="{{ ui.hint() }}">Dann enthält jede Benachrichtigung auch einen Link zurück zu Ebay Watcher.</p>
+      <p class="{{ ui.hint() }}">Dann enthält jede Benachrichtigung auch einen Link zurück zu Ebay Watcher, und das Artikelbild kommt aus dem eigenen Bild-Cache statt von eBay. Das Handy muss diese Adresse erreichen können, sonst fehlt das Bild in der Benachrichtigung.</p>
       {{ ui.error(errors, 'app_url') }}
     </div>
     <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button('primary') }}" type="submit">Speichern</button></div>
@@ -201,6 +201,7 @@
     {% set fact = "flex justify-between gap-4 border-b border-line pb-2.5" %}
     <dl class="grid gap-2.5">
       <div class="{{ fact }}"><dt class="text-muted">Version</dt><dd class="{{ ui.num() }} text-right">{{ app_version }}</dd></div>
+      <div class="{{ fact }}"><dt class="text-muted">Bild-Cache</dt><dd class="{{ ui.num() }} text-right">{{ image_cache.count }} {{ 'Bild' if image_cache.count == 1 else 'Bilder' }}, {{ '%.1f'|format(image_cache.megabytes)|replace('.', ',') }} MB</dd></div>
     </dl>
     <p><a href="{{ repo_url }}/tags" target="_blank" rel="noopener noreferrer">Versionen auf GitHub ansehen</a></p>
   </div>

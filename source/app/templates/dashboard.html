@@ -46,8 +46,8 @@
             md:view-list:grid-cols-[64px_minmax(0,1fr)_minmax(200px,280px)] md:view-list:gap-5">
 
     <div class="relative grid place-items-center overflow-hidden bg-tile view-cards:aspect-[4/3] view-cards:rounded-tile view-list:aspect-square view-list:rounded-thumb">
-      {% if f and f.image_large %}
-      <img class="{{ ui.product_image('card') }} group-data-paused/entry:opacity-45" src="{{ f.image_large }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+      {% if f and f.image %}
+      <img class="{{ ui.product_image('card') }} group-data-paused/entry:opacity-45" src="{{ image_url(f) }}" alt="" loading="lazy" referrerpolicy="no-referrer">
       {% else %}
       <span class="font-num leading-none font-medium text-muted opacity-55 view-cards:text-[64px] view-list:text-2xl group-data-paused/entry:opacity-45" aria-hidden="true">{{ s.initial }}</span>
       {% endif %}

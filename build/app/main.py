@@ -11,11 +11,11 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, config, db, notify, util
+from . import auth, config, db, images, notify, util
 from .watcher import Watcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -34,6 +34,7 @@ async def lifespan(_app: FastAPI):
     log.info("Ebay Watcher %s läuft.", config.APP_VERSION)
     yield
     await watcher.stop()
+    await images.close()
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -58,9 +59,14 @@ def asset(path: str) -> str:
     return f"/static/{path}?v={cached[1]}"
 
 
+def image_url(v: dict) -> str | None:
+    """Adresse des Artikelbildes im eigenen Bild-Cache (siehe images.py)."""
+    return images.url(v.get("search_id"), v.get("item_id"), v.get("image"))
+
+
 templates.env.globals.update(
     eur=util.eur, countdown=util.countdown, local_time=util.local_time, ago=util.ago,
-    gauge=util.gauge, asset=asset, app_name=config.APP_NAME,
+    gauge=util.gauge, asset=asset, image_url=image_url, app_name=config.APP_NAME,
     app_version=config.APP_VERSION, repo_url=config.REPO_URL,
 )
 
@@ -84,9 +90,12 @@ MESSAGES = {
     "logout": "Du bist abgemeldet.",
 }
 
-CSP = ("default-src 'self'; img-src 'self' data: https:; style-src 'self'; script-src 'self'; "
+# Bilder kommen aus dem eigenen Cache; eBay nur, falls der Cache ein Bild nicht laden konnte
+CSP = ("default-src 'self'; img-src 'self' data: https://*.ebayimg.com https://*.ebaystatic.com; "
+       "style-src 'self'; script-src 'self'; "
        "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
-PUBLIC_PREFIXES = ("/login", "/static/", "/healthz", "/favicon")
+# /bild/ ohne Login, damit ntfy auf dem Handy die Bilder laden kann. Geschützt durch die Signatur.
+PUBLIC_PREFIXES = ("/login", "/static/", "/healthz", "/favicon", "/bild/")
 
 
 # ---------------------------------------------------------------- Hilfen
@@ -186,6 +195,22 @@ async def csrf_failed(request: Request, _exc: CsrfFailed):
 @app.get("/healthz")
 async def healthz():
     return PlainTextResponse("ok")
+
+
+@app.api_route("/bild/{sid}/{item_id}", methods=["GET", "HEAD"])
+async def article_image(request: Request, sid: int, item_id: str):
+    """Artikelbild aus dem Bild-Cache. Beim ersten Abruf lädt Ebay Watcher es einmal bei eBay."""
+    if not images.valid(sid, item_id, request.query_params.get("s")):
+        return PlainTextResponse("Ungültige Bildadresse.", 403)
+    address = images.source(sid, item_id)
+    if not address or not images.allowed(address):
+        return PlainTextResponse("Bild nicht gefunden.", 404)
+    path = await images.cached(address)
+    if not path:
+        # Notlösung: der Browser holt das Bild selbst bei eBay, wie ohne Cache
+        return RedirectResponse(address, 302, headers={"Cache-Control": "no-store"})
+    return FileResponse(path, media_type=images.media_type(path),
+                        headers={"Cache-Control": f"private, max-age={images.BROWSER_CACHE_SECONDS}"})
 
 
 # ---------------------------------------------------------------- Anmeldung
@@ -535,7 +560,8 @@ def _settings_page(request: Request, errors: dict | None = None, values: dict | 
     return render(request, "settings.html", status_code=status, active="settings", s=s, user=user,
                   errors=errors or {}, sessions=sessions, ebay_configured=watcher.ebay.configured,
                   ebay_check=watcher.last_ebay_check, ntfy_error=watcher.last_ntfy_error,
-                  api_calls=db.api_calls_today(), has_token=bool(s.get("ntfy_token")))
+                  api_calls=db.api_calls_today(), has_token=bool(s.get("ntfy_token")),
+                  image_cache=images.stats())
 
 
 @app.get("/settings", response_class=HTMLResponse)
