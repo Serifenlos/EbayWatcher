@@ -79,6 +79,8 @@ MESSAGES = {
     "2fa_off": "Die Zwei-Faktor-Anmeldung ist ausgeschaltet.",
     "sessions": "Alle anderen Geräte sind abgemeldet.",
     "ebay": "Verbindung zu eBay geprüft.",
+    "hidden": "Angebot ausgeblendet.",
+    "unhidden": "Angebot wieder eingeblendet.",
     "logout": "Du bist abgemeldet.",
 }
 
@@ -313,8 +315,10 @@ def _notices() -> list[dict]:
 async def dashboard(request: Request):
     now = time.time()
     searches = db.q("SELECT * FROM searches ORDER BY active DESC, created_at DESC")
+    hidden = db.hidden_ids_by_search()
     overviews = [
-        util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (s["id"],)), now)
+        util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (s["id"],)), now,
+                             hidden.get(s["id"]))
         for s in searches
     ]
     return render(request, "dashboard.html", active="searches", searches=overviews,
@@ -410,8 +414,59 @@ async def search_detail(request: Request, sid: int):
     if not s:
         return not_found(request)
     now = time.time()
-    overview = util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (sid,)), now)
-    return render(request, "search_detail.html", active="searches", s=overview, now=now)
+    overview = util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (sid,)), now,
+                                    db.hidden_ids(sid))
+    # Ohne JavaScript lassen sich die eingeklappten Listen über ?show=over bzw. ?show=hidden aufklappen
+    show = request.query_params.get("show")
+    hidden = _hidden_views(s, now) if show == "hidden" else []
+    return render(request, "search_detail.html", active="searches", s=overview, now=now,
+                  show=show, hidden=hidden)
+
+
+def _hidden_views(s: dict, now: float) -> list[dict]:
+    rows = db.q("SELECT * FROM hidden_items WHERE search_id = ? ORDER BY hidden_at DESC", (s["id"],))
+    items = {r["item_id"]: r for r in db.q(
+        "SELECT * FROM items WHERE search_id = ? AND item_id IN "
+        "(SELECT item_id FROM hidden_items WHERE search_id = ?)", (s["id"], s["id"]))}
+    return [util.hidden_view(r, items.get(r["item_id"]), s, now) for r in rows]
+
+
+@app.get("/searches/{sid}/list/{kind}", response_class=HTMLResponse)
+async def search_list(request: Request, sid: int, kind: str):
+    """Eingeklappte Listen („zu teuer“, „ausgeblendet“) werden erst beim Aufklappen geladen."""
+    s = db.q1("SELECT * FROM searches WHERE id = ?", (sid,))
+    if not s or kind not in ("over", "hidden"):
+        return not_found(request)
+    now = time.time()
+    if kind == "over":
+        offers = util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (sid,)), now,
+                                      db.hidden_ids(sid))["over"]
+    else:
+        offers = _hidden_views(s, now)
+    return render(request, "includes/offer_list.html", offers=offers, kind=kind, sid=sid, now=now)
+
+
+@app.post("/searches/{sid}/hide")
+async def hide_item(request: Request, sid: int):
+    form = await checked_form(request)
+    item_id = str(form.get("item_id", ""))[:100]
+    item = db.q1("SELECT * FROM items WHERE search_id = ? AND item_id = ?", (sid, item_id))
+    if not item:
+        return not_found(request)
+    db.ex(
+        "INSERT INTO hidden_items(search_id, item_id, title, url, image, hidden_at) VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(search_id, item_id) DO NOTHING",
+        (sid, item_id, item["title"], item["url"], item["image"], time.time()),
+    )
+    return back(f"/searches/{sid}", "hidden", anchor="treffer")
+
+
+@app.post("/searches/{sid}/unhide")
+async def unhide_item(request: Request, sid: int):
+    form = await checked_form(request)
+    item_id = str(form.get("item_id", ""))[:100]
+    db.ex("DELETE FROM hidden_items WHERE search_id = ? AND item_id = ?", (sid, item_id))
+    return back(f"/searches/{sid}", "unhidden", anchor="treffer")
 
 
 @app.get("/searches/{sid}/edit", response_class=HTMLResponse)

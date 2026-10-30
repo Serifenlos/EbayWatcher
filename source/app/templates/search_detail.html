@@ -24,10 +24,21 @@
 
 {% if s.last_error %}<p class="{{ ui.notice('error') }} my-3.5">{{ s.last_error }}</p>{% endif %}
 
-<section class="mt-12">
-  <h2 class="mb-2 flex items-baseline gap-2.5">Unter deinem Limit <span class="font-num text-ui font-medium text-muted">{{ s.count }}</span></h2>
+<section class="mt-12" id="treffer" data-list="matches">
+  <div class="mb-2 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+    <h2 class="flex items-baseline gap-2.5">Unter deinem Limit <span class="font-num text-ui font-medium text-muted" data-count="matches">{{ s.count }}</span></h2>
+    {% if s.matches|length > 1 %}
+    {# Sortieren passiert im Browser, deshalb ohne JavaScript ausgeblendet (app.js zeigt die Leiste an) #}
+    <div class="inline-flex max-w-full gap-0.5 overflow-x-auto rounded-control bg-tile p-0.75" role="group" aria-label="Sortieren" data-sort-control hidden>
+      {# Auf schmalen Bildschirmen steht nur „Neu“, damit die Leiste in eine Zeile passt #}
+      {% for key, text, more in [('end', 'Endet zuerst', ''), ('price', 'Preis', ''), ('new', 'Neu', ' eingestellt')] + ([('distance', 'Entfernung', '')] if s.has_distance else []) %}
+      <button type="button" data-sort="{{ key }}" aria-pressed="{{ 'true' if key == 'end' else 'false' }}" class="{{ ui.segment() }} aria-pressed:border-line aria-pressed:bg-surface aria-pressed:text-ink">{{ text }}{% if more %}<span class="max-sm:hidden">{{ more }}</span>{% endif %}</button>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
   {% if s.matches %}
-  <ol class="mt-2 border-t border-line">{% for v in s.matches %}{% set dim = false %}{% include "includes/offer.html" %}{% endfor %}</ol>
+  {% with offers = s.matches, kind = 'matches', sid = s.id %}{% include "includes/offer_list.html" %}{% endwith %}
   {% elif not s.last_run %}
   <p class="mt-1.5 mb-3 max-w-[70ch] text-muted">Die erste Suche startet gleich. Lade die Seite in einem Moment neu.</p>
   {% else %}
@@ -35,13 +46,39 @@
   {% endif %}
 </section>
 
+{#
+  Eingeklappte Listen: Der Inhalt wird erst beim Aufklappen geladen (app.js, data-lazy).
+  Ohne JavaScript führt der Link „Liste anzeigen“ zu ?show=…, dann kommt die Liste gleich mit.
+#}
+{% set fold = "group/fold mt-10 border-t border-line pt-4" %}
+{% set fold_summary = "flex cursor-pointer list-none items-baseline gap-2.5 text-section font-semibold [&::-webkit-details-marker]:hidden after:ml-auto after:text-xl after:leading-none after:font-normal after:text-muted after:content-['+'] group-open/fold:after:content-['–']" %}
+
 {% if s.over %}
-<section class="mt-12">
-  <h2 class="mb-2 flex items-baseline gap-2.5">Mit Versand über dem Limit <span class="font-num text-ui font-medium text-muted">{{ s.over|length }}</span></h2>
-  <p class="mt-1.5 mb-3 max-w-[70ch] text-muted">Der Artikelpreis passt, erst die Versandkosten heben ihn über dein Limit. Dafür gibt es keine Benachrichtigung.</p>
-  <ol class="mt-2 border-t border-line">{% for v in s.over %}{% set dim = true %}{% include "includes/offer.html" %}{% endfor %}</ol>
-</section>
+<details class="{{ fold }}" id="zu-teuer" data-list="over" data-lazy="/searches/{{ s.id }}/list/over" {% if show == 'over' %}open data-loaded{% endif %}>
+  <summary class="{{ fold_summary }}">Mit Versand über dem Limit <span class="font-num text-ui font-medium text-muted" data-count="over">{{ s.over|length }}</span></summary>
+  <p class="mt-2 mb-3 max-w-[70ch] text-muted">Der Artikelpreis passt, erst die Versandkosten heben ihn über dein Limit. Dafür gibt es keine Benachrichtigung.</p>
+  <div data-lazy-target>
+    {% if show == 'over' %}
+    {% with offers = s.over, kind = 'over', sid = s.id %}{% include "includes/offer_list.html" %}{% endwith %}
+    {% else %}
+    <p class="text-sm"><a href="/searches/{{ s.id }}?show=over#zu-teuer">Liste anzeigen</a></p>
+    {% endif %}
+  </div>
+</details>
 {% endif %}
+
+{# Immer vorhanden, aber versteckt, solange nichts ausgeblendet ist (app.js zeigt sie nach dem ersten Ausblenden) #}
+<details class="{{ fold }}" id="ausgeblendet" data-lazy="/searches/{{ s.id }}/list/hidden" {% if show == 'hidden' %}open data-loaded{% endif %} {% if not s.hidden_count %}hidden{% endif %}>
+  <summary class="{{ fold_summary }}">Ausgeblendet <span class="font-num text-ui font-medium text-muted" data-count="hidden">{{ s.hidden_count }}</span></summary>
+  <p class="mt-2 mb-3 max-w-[70ch] text-muted">Diese Angebote zeigt Ebay Watcher nicht mehr an und meldet sie nicht. Über das Auge holst du sie zurück.</p>
+  <div data-lazy-target>
+    {% if show == 'hidden' %}
+    {% with offers = hidden, kind = 'hidden', sid = s.id %}{% include "includes/offer_list.html" %}{% endwith %}
+    {% else %}
+    <p class="text-sm"><a href="/searches/{{ s.id }}?show=hidden#ausgeblendet">Liste anzeigen</a></p>
+    {% endif %}
+  </div>
+</details>
 
 <section class="mt-16 border-t border-line pt-5">
   <form method="post" action="/searches/{{ s.id }}/delete" data-confirm="Gesuch „{{ s.title }}“ wirklich löschen?">

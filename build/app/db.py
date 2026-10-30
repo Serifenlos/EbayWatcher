@@ -89,6 +89,18 @@ CREATE TABLE IF NOT EXISTS items (
 
 CREATE INDEX IF NOT EXISTS idx_items_end ON items(status, end_checked, end_time);
 
+-- Von Hand ausgeblendete Angebote, je Gesuch. Titel, Link und Bild als Kopie,
+-- damit die Liste „Ausgeblendet“ auch nach dem Ende des Angebots noch etwas zeigt.
+CREATE TABLE IF NOT EXISTS hidden_items (
+    search_id   INTEGER NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
+    item_id     TEXT NOT NULL,
+    title       TEXT,
+    url         TEXT,
+    image       TEXT,
+    hidden_at   REAL NOT NULL,
+    PRIMARY KEY (search_id, item_id)
+);
+
 CREATE TABLE IF NOT EXISTS api_usage (
     day    TEXT PRIMARY KEY,
     calls  INTEGER NOT NULL DEFAULT 0
@@ -163,6 +175,19 @@ def setting_int(settings: dict[str, str], key: str, fallback: int) -> int:
         return fallback
 
 
+# ---------------------------------------------------------------- Ausgeblendete Angebote
+
+def hidden_ids(search_id: int) -> set[str]:
+    return {r["item_id"] for r in q("SELECT item_id FROM hidden_items WHERE search_id = ?", (search_id,))}
+
+
+def hidden_ids_by_search() -> dict[int, set[str]]:
+    result: dict[int, set[str]] = {}
+    for r in q("SELECT search_id, item_id FROM hidden_items"):
+        result.setdefault(r["search_id"], set()).add(r["item_id"])
+    return result
+
+
 # ---------------------------------------------------------------- API-Zähler
 
 def _today() -> str:
@@ -193,4 +218,10 @@ def prune() -> None:
         (now,),
     )
     ex("DELETE FROM items WHERE status != 'active' AND last_seen < ?", (now - 7 * 86400,))
+    # Ausgeblendete Angebote vergessen, wenn das Angebot selbst schon gelöscht ist
+    ex(
+        "DELETE FROM hidden_items WHERE hidden_at < ? AND NOT EXISTS ("
+        "SELECT 1 FROM items i WHERE i.search_id = hidden_items.search_id AND i.item_id = hidden_items.item_id)",
+        (now - 30 * 86400,),
+    )
     ex("DELETE FROM api_usage WHERE day < date('now', '-60 day')")

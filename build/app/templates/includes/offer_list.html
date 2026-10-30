@@ -1,0 +1,14 @@
+{#
+  Liste von Angeboten. Wird direkt in die Detailseite eingebunden oder beim Aufklappen
+  einer eingeklappten Liste nachgeladen (GET /searches/<id>/list/over bzw. /hidden).
+  Erwartet: offers, kind ("matches", "over" oder "hidden"), sid, csrf, now
+#}
+{% if offers %}
+<ol class="mt-2 border-t border-line" data-sortable>
+  {% for v in offers %}{% include "includes/offer.html" %}{% endfor %}
+</ol>
+{% elif kind == 'hidden' %}
+<p class="mt-1.5 mb-3 text-muted">Keine ausgeblendeten Angebote.</p>
+{% else %}
+<p class="mt-1.5 mb-3 text-muted">Gerade keine Angebote in dieser Liste.</p>
+{% endif %}

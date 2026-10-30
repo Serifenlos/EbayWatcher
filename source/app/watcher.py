@@ -141,6 +141,7 @@ class Watcher:
             return
 
         excluded = util.exclusion_words(s["exclude"])
+        hidden = db.hidden_ids(s["id"])   # von Hand ausgeblendet: weiter aktualisieren, aber nie melden
         seen: set[str] = set()
         missing_end: list[str] = []
         new_fixed: list[dict] = []
@@ -168,7 +169,7 @@ class Watcher:
             if row["is_auction"] and not row["end_time"]:
                 missing_end.append(item_id)
 
-            if s["format"] in ("fixed", "both") and row["has_bin"] and not row["notified_bin"]:
+            if s["format"] in ("fixed", "both") and row["has_bin"] and not row["notified_bin"] and item_id not in hidden:
                 view = util.item_view(row, as_fixed, now)
                 if view["within"]:
                     new_fixed.append(view)
@@ -204,6 +205,8 @@ class Watcher:
               AND i.status = 'active' AND i.is_auction = 1 AND i.end_checked = 0
               AND i.end_time IS NOT NULL AND i.end_time > ?
               AND i.end_time - s.lead_minutes * 60 <= ?
+              AND NOT EXISTS (SELECT 1 FROM hidden_items h
+                              WHERE h.search_id = i.search_id AND h.item_id = i.item_id)
             ORDER BY i.end_time LIMIT 25
             """,
             (now, now),

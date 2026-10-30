@@ -221,6 +221,14 @@
       "oAP" : "\/build\/app\/templates\/dashboard.html",
       "oF" : 0
     },
+    "\/source\/app\/templates\/includes\/offer_list.html" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 0,
+      "oAP" : "\/build\/app\/templates\/includes\/offer_list.html",
+      "oF" : 0
+    },
     "\/source\/app\/templates\/includes\/offer.html" : {
       "cB" : 0,
       "ft" : 8192,

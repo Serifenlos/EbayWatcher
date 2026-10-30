@@ -276,11 +276,18 @@ def item_view(item: dict, search: dict, now: float) -> dict:
     }
 
 
-def search_overview(search: dict, items: list[dict], now: float) -> dict:
+def ending_first(v: dict) -> tuple:
+    """Voreingestellte Sortierung „Endet zuerst“: nach Endzeit, Angebote ohne Endzeit zuletzt, dann nach Preis."""
+    return (v.get("end_time") is None, v.get("end_time") or 0, v.get("total") or 0)
+
+
+def search_overview(search: dict, items: list[dict], now: float, hidden: set[str] | None = None) -> dict:
+    hidden = hidden or set()
     views = [
         item_view(i, search, now)
         for i in items
         if i["status"] == "active" and (not i["end_time"] or i["end_time"] > now)
+        and i["item_id"] not in hidden
     ]
     within = [v for v in views if v["within"]]
     auctions = sorted((v for v in within if v["auction"] and v["end_time"]), key=lambda v: v["end_time"])
@@ -291,12 +298,34 @@ def search_overview(search: dict, items: list[dict], now: float) -> dict:
         "title": search["name"] or search["query"],
         "description": describe_search(search),
         "limit": limit_text(search),
-        "matches": auctions + fixed,
-        "over": sorted((v for v in views if not v["within"]), key=lambda v: v["total"] or 0),
+        "matches": sorted(within, key=ending_first),
+        "over": sorted((v for v in views if not v["within"]), key=ending_first),
+        "hidden_count": len(hidden),
+        "has_distance": any(v.get("distance_km") is not None for v in within),
         "feature": feature,
         "count": len(within),
         "initial": (search["name"] or search["query"] or "?").strip()[:1].upper(),
     }
+
+
+def hidden_view(row: dict, item: dict | None, search: dict, now: float) -> dict:
+    """Eintrag für die Liste „Ausgeblendet“. Gibt es das Angebot nicht mehr, reicht die gespeicherte Kopie."""
+    if item:
+        view = item_view(item, search, now)
+        if item["status"] != "active" or (item["end_time"] and item["end_time"] <= now):
+            view["kind"] = "Beendet"
+            view["end_time"] = None
+    else:
+        view = {
+            "item_id": row["item_id"], "title": row["title"] or "", "url": row["url"] or "",
+            "image": row["image"], "image_large": large_image(row["image"]), "kind": "Beendet",
+            "auction": False, "total": None, "rel_price": None, "ratio": 0.0, "within": False,
+            "flags": [], "show_shipping": False, "shipping_known": 0, "shipping": None,
+            "pickup_only": 0, "bid_count": None, "location_text": "", "end_time": None,
+            "first_seen": row["hidden_at"], "distance_km": None,
+        }
+    view["hidden_at"] = row["hidden_at"]
+    return view
 
 
 def gauge(ratio: float) -> dict:

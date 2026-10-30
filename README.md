@@ -16,6 +16,7 @@ Es nutzt die offizielle eBay Browse API und läuft als einzelner Docker-Containe
 - Es werden nur Angebote berücksichtigt, die nach Deutschland versendet werden; bei Angeboten außerhalb der EU weist die Benachrichtigung auf möglichen Zoll hin
 - Angebote nur zur Abholung: im Umkreis deiner Postleitzahl, alle mit Entfernung markiert, oder ausgeblendet
 - Startseite mit allen Gesuchen als Karten oder Liste, hell oder dunkel nach Systemeinstellung
+- Treffer sortierbar nach Endzeit, Preis, Einstelldatum oder Entfernung; unpassende Angebote lassen sich ausblenden und werden dann auch nicht mehr gemeldet
 - Sicherer Login: Argon2-Passwort-Hash, Sperre nach Fehlversuchen, „Angemeldet bleiben“ für 3 Monate, optional Zwei-Faktor per Authenticator-App, Übersicht und Abmeldung aller Geräte
 
 So arbeitet Ebay Watcher: Es sucht im eingestellten Intervall (Standard 15 Minuten) nach neuen Angeboten und merkt sich jede Auktion mit ihrer Endzeit. Genau X Minuten vor Ende fragt es den aktuellen Preis einmal ab und meldet sich, wenn er unter deinem Limit liegt. Dadurch braucht es nur wenige API-Abfragen.

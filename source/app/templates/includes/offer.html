@@ -1,7 +1,16 @@
-{# Ein Angebot in der Liste auf der Detailseite. Erwartet: v (Angebot), dim (blasser darstellen) #}
+{#
+  Ein Angebot in einer Liste auf der Detailseite.
+  Erwartet: v (Angebot), sid (Gesuch), kind ("matches", "over" oder "hidden"), csrf, now
+  Die data-sort-…-Attribute nutzt das Sortieren im Browser (app.js).
+#}
 {% import "includes/ui.html" as ui %}
-<li class="border-b border-line {{ 'opacity-70' if dim }}">
-  <a class="group/offer grid grid-cols-[68px_minmax(0,1fr)] items-start gap-x-4 gap-y-2 py-4 text-inherit no-underline md:grid-cols-[84px_minmax(0,1fr)_minmax(170px,230px)] md:items-center md:gap-5"
+<li class="flex items-start gap-2 border-b border-line md:items-center {{ 'opacity-70' if kind == 'over' }}"
+    data-offer
+    data-sort-end="{{ v.end_time|int if v.end_time else '' }}"
+    data-sort-price="{{ v.total if v.total is not none else '' }}"
+    data-sort-new="{{ v.first_seen|int if v.first_seen else '' }}"
+    data-sort-distance="{{ v.distance_km if v.distance_km is not none else '' }}">
+  <a class="group/offer grid min-w-0 grow grid-cols-[68px_minmax(0,1fr)] items-start gap-x-4 gap-y-2 py-4 text-inherit no-underline md:grid-cols-[84px_minmax(0,1fr)_minmax(170px,230px)] md:items-center md:gap-5 {{ 'opacity-60' if kind == 'hidden' }}"
      href="{{ v.url }}" target="_blank" rel="noopener noreferrer">
     <span class="grid aspect-square place-items-center overflow-hidden rounded-thumb bg-tile">
       {% if v.image %}<img class="{{ ui.product_image('list') }}" src="{{ v.image_large or v.image }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}
@@ -12,11 +21,24 @@
       {% for flag in v.flags %}<span class="text-meta font-medium text-tight">{{ flag }}</span>{% endfor %}
     </span>
     <span class="col-start-2 grid justify-items-start gap-1 text-left md:col-start-auto md:justify-items-end md:text-right">
+      {% if v.total is not none %}
       <span class="{{ ui.num() }} text-section font-semibold">{{ eur(v.total) }}</span>
       {% if v.show_shipping %}<span class="text-meta text-muted">{{ eur(v.rel_price) }} + {{ eur(v.shipping) }} Versand</span>
       {% elif v.shipping_known and not v.shipping and not v.pickup_only %}<span class="text-meta text-muted">Versand kostenlos</span>{% endif %}
       {{ ui.limit_line(v.ratio, 'max-w-45') }}
+      {% endif %}
       {% if v.auction and v.end_time %}<span class="text-meta text-muted">Endet in {{ ui.countdown_span(v.end_time, now) }}</span>{% endif %}
     </span>
   </a>
+  {% if kind == 'hidden' %}
+  <form method="post" action="/searches/{{ sid }}/unhide" class="mt-4 md:mt-0">
+    {{ ui.csrf_field(csrf) }}<input type="hidden" name="item_id" value="{{ v.item_id }}">
+    <button class="{{ ui.icon_button() }}" type="submit" title="Wieder einblenden" aria-label="Wieder einblenden">{{ ui.icon('eye') }}</button>
+  </form>
+  {% else %}
+  <form method="post" action="/searches/{{ sid }}/hide" class="mt-4 md:mt-0" data-hide>
+    {{ ui.csrf_field(csrf) }}<input type="hidden" name="item_id" value="{{ v.item_id }}">
+    <button class="{{ ui.icon_button() }}" type="submit" title="Ausblenden" aria-label="Ausblenden">{{ ui.icon('eye-off') }}</button>
+  </form>
+  {% endif %}
 </li>
