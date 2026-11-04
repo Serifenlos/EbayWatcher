@@ -63,7 +63,7 @@
     <div class="grid view-cards:mt-3.5 view-cards:gap-1.5 view-list:col-start-2 view-list:gap-1 md:view-list:col-start-auto group-data-paused/entry:opacity-45">
       {% if f %}
       <p class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-        <span class="{{ ui.num() }} font-semibold tracking-[-0.01em] view-cards:text-figure view-list:text-title">{{ eur(f.total) }}</span>
+        <span class="{{ ui.num() }} font-semibold tracking-[-0.01em] view-cards:text-figure view-list:text-title">{{ eur(f.gross if prices_with_shipping else f.rel_price) }}</span>
         <span class="text-meta text-muted">{{ s.limit }}</span>
       </p>
       {{ ui.limit_line(f.ratio) }}

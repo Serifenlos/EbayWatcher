@@ -2,7 +2,8 @@
 
 Zwei getrennte Abläufe:
 * Entdecken: jedes aktive Gesuch wird im eingestellten Intervall nach neuen Angeboten durchsucht.
-* Endspurt: jede gemerkte Auktion wird genau einmal X Minuten vor ihrem Ende geprüft.
+* Endspurt: jede gemerkte Auktion wird genau einmal X Minuten vor ihrem Ende geprüft. Hat man in der
+  Benachrichtigung „1 Min vorher erinnern“ gedrückt, wird sie 1 Minute vor Ende noch einmal geprüft.
 Sofortkauf-Angebote unter dem Limit werden direkt beim Entdecken gemeldet.
 Dazu alle paar Minuten: Vergleichsangebote für den Durchschnittspreis holen (market.py).
 """
@@ -12,8 +13,9 @@ import asyncio
 import contextlib
 import logging
 import time
+from urllib.parse import quote
 
-from . import db, images, market, notify, util
+from . import db, images, market, notify, signed, util
 from .ebay import EbayClient, EbayError
 
 log = logging.getLogger("ebay-watcher")
@@ -28,12 +30,15 @@ MARKET_LOOKUPS_PER_RUN = 3     # … und dann höchstens so viele gezielte Abfra
 ITEM_FIELDS = [
     "title", "url", "image", "is_auction", "has_bin", "price", "bin_price", "currency",
     "shipping", "shipping_known", "bid_count", "end_time", "country", "location_text",
-    "pickup", "pickup_only", "distance_km", "epid", "cond",
+    "pickup", "pickup_only", "distance_km", "near", "epid", "cond",
 ]
 FORMATS = {"auction": ["AUCTION"], "fixed": ["FIXED_PRICE"], "both": ["AUCTION", "FIXED_PRICE"]}
 
 
 class Watcher:
+    REMIND_BEFORE = 60          # „1 Min vorher erinnern“: so viele Sekunden vor Ende kommt der Hinweis
+    REMIND_LEAD = 8             # … und so viel früher wird bei eBay nachgesehen (Zeit für Abfrage und Versand)
+
     def __init__(self) -> None:
         self.ebay = EbayClient()
         self.wake = asyncio.Event()
@@ -68,10 +73,19 @@ class Watcher:
             except Exception:
                 log.exception("Fehler im Prüfzyklus")
             try:
-                await asyncio.wait_for(self.wake.wait(), timeout=TICK_SECONDS)
+                await asyncio.wait_for(self.wake.wait(), timeout=self._next_wait())
             except asyncio.TimeoutError:
                 pass
             self.wake.clear()
+
+    def _next_wait(self) -> float:
+        """Bis zum nächsten Takt warten, bei einer anstehenden Erinnerung aber pünktlich aufwachen."""
+        row = db.q1("SELECT MIN(end_time) AS t FROM items WHERE remind = 1 AND reminded = 0 AND status = 'active' "
+                    "AND end_time > ?", (time.time(),))
+        if row and row["t"]:
+            due = row["t"] - self.REMIND_BEFORE - self.REMIND_LEAD - time.time()
+            return max(1.0, min(TICK_SECONDS, due))
+        return TICK_SECONDS
 
     async def tick(self) -> None:
         self.last_tick = time.time()
@@ -81,6 +95,7 @@ class Watcher:
             return
         settings = db.get_settings()
         await self.check_endings(settings)
+        await self.check_reminders(settings)
         interval = max(5, db.setting_int(settings, "interval_minutes", 15)) * 60
         for s in db.q("SELECT * FROM searches WHERE active = 1 ORDER BY id"):
             if s["last_run"] is None or time.time() - s["last_run"] >= interval:
@@ -109,6 +124,7 @@ class Watcher:
     async def discover(self, s: dict, settings: dict) -> None:
         now = time.time()
         plz = (settings.get("plz") or "").strip()
+        radius = db.setting_int(settings, "radius_km", 50)
         formats = FORMATS.get(s["format"], ["AUCTION"])
         found: dict[str, tuple[dict, bool]] = {}
 
@@ -127,19 +143,18 @@ class Watcher:
                         found[summary["itemId"]] = (summary, False)
 
             if s["pickup_mode"] != "hide" and plz:
-                radius = (db.setting_int(settings, "radius_km", 50)
-                          if s["pickup_mode"] == "radius" else PICKUP_RADIUS_ALL_KM)
+                search_radius = radius if s["pickup_mode"] == "radius" else PICKUP_RADIUS_ALL_KM
                 filters = self._base_filters(s) + [
                     "buyingOptions:{" + "|".join(formats) + "}",
                     "deliveryOptions:{SELLER_ARRANGED_LOCAL_PICKUP}",
                     "pickupCountry:DE",
                     f"pickupPostalCode:{plz}",
-                    f"pickupRadius:{radius}",
+                    f"pickupRadius:{search_radius}",
                     "pickupRadiusUnit:km",
                 ]
                 for summary in await self.ebay.search(s["query"], filters, None, plz):
                     item_id = summary.get("itemId")
-                    if item_id and item_id not in found:
+                    if item_id:   # auch Angebote mit Versand: so kennt Ebay Watcher die Entfernung
                         found[item_id] = (summary, True)
         except EbayError as e:
             log.warning("Gesuch %s: %s", s["id"], e)
@@ -155,6 +170,10 @@ class Watcher:
 
         for item_id, (summary, pickup) in found.items():
             data = util.parse_listing(summary, pickup)
+            # Abholbar im eingestellten Umkreis: dann zählt der Preis ohne Versand
+            distance = data["distance_km"]
+            data["near"] = int(bool(pickup) and (distance <= radius if distance is not None
+                                                  else s["pickup_mode"] == "radius"))
             title = data["title"].lower()
             if any(word in title for word in excluded):
                 continue
@@ -226,30 +245,15 @@ class Watcher:
             if not s:
                 continue
             try:
-                detail = await self.ebay.get_item(row["item_id"], plz)
+                item = await self._fresh_item(row, plz)
             except EbayError as e:
                 log.warning("Endspurt-Prüfung %s: %s", row["item_id"], e)
                 return  # beim nächsten Takt erneut versuchen
 
             key = (s["id"], row["item_id"])
-            if detail is None:
-                db.ex("UPDATE items SET status = 'gone', end_checked = 1 WHERE search_id = ? AND item_id = ?", key)
+            if item is None:
+                db.ex("UPDATE items SET end_checked = 1 WHERE search_id = ? AND item_id = ?", key)
                 continue
-
-            fresh = util.parse_listing(detail, bool(row["pickup"]))
-            # Was getItem nicht (zuverlässig) liefert, aus der Suche übernehmen
-            for field in ("pickup", "pickup_only", "distance_km"):
-                fresh[field] = row[field]
-            if fresh["pickup_only"]:
-                fresh["shipping"], fresh["shipping_known"] = 0.0, 1
-            elif not fresh["shipping_known"] and row["shipping_known"]:
-                fresh["shipping"], fresh["shipping_known"] = row["shipping"], 1
-            for field in ("end_time", "image", "url", "title", "epid", "cond"):
-                if not fresh[field]:
-                    fresh[field] = row[field]
-            self._update_item(s["id"], row["item_id"], fresh, time.time(), reset_end=False)
-
-            item = {**row, **fresh, "status": "active"}
             now = time.time()
             if item["end_time"] <= now:
                 db.ex("UPDATE items SET status = 'ended', end_checked = 1 WHERE search_id = ? AND item_id = ?", key)
@@ -270,6 +274,93 @@ class Watcher:
                 "UPDATE items SET end_checked = 1, notified_end = ? WHERE search_id = ? AND item_id = ?",
                 (1 if view["within"] else 0, *key),
             )
+
+    async def _fresh_item(self, row: dict, plz: str) -> dict | None:
+        """Aktueller Stand eines gemerkten Angebots über getItem (eine Abfrage). None: bei eBay nicht mehr da."""
+        detail = await self.ebay.get_item(row["item_id"], plz)
+        if detail is None:
+            db.ex("UPDATE items SET status = 'gone' WHERE search_id = ? AND item_id = ?",
+                  (row["search_id"], row["item_id"]))
+            return None
+        fresh = util.parse_listing(detail, bool(row["pickup"]))
+        # Was getItem nicht (zuverlässig) liefert, aus der Suche übernehmen
+        for field in ("pickup", "pickup_only", "distance_km", "near"):
+            fresh[field] = row[field]
+        if fresh["pickup_only"]:
+            fresh["shipping"], fresh["shipping_known"] = 0.0, 1
+        elif not fresh["shipping_known"] and row["shipping_known"]:
+            fresh["shipping"], fresh["shipping_known"] = row["shipping"], 1
+        for field in ("end_time", "image", "url", "title", "epid", "cond"):
+            if not fresh[field]:
+                fresh[field] = row[field]
+        self._update_item(row["search_id"], row["item_id"], fresh, time.time(), reset_end=False)
+        return {**row, **fresh, "status": "active"}
+
+    # ------------------------------------------------------------ Erinnerung 1 Minute vor Ende
+
+    async def check_reminders(self, settings: dict) -> None:
+        """Angebote mit gedrücktem „1 Min vorher erinnern“: kurz vor Ende den Preis holen und, wenn er
+        noch passt, auffällig melden. Passt er nicht mehr, kommt ein stiller Hinweis."""
+        now = time.time()
+        rows = db.q(
+            """
+            SELECT i.* FROM items i JOIN searches s ON s.id = i.search_id
+            WHERE s.active = 1 AND i.remind = 1 AND i.reminded = 0 AND i.status = 'active'
+              AND i.end_time IS NOT NULL AND i.end_time > ? AND i.end_time - ? <= ?
+              AND NOT EXISTS (SELECT 1 FROM hidden_items h
+                              WHERE h.search_id = i.search_id AND h.item_id = i.item_id)
+            ORDER BY i.end_time
+            """,
+            (now, self.REMIND_BEFORE + self.REMIND_LEAD, now),
+        )
+        plz = (settings.get("plz") or "").strip()
+        for row in rows:
+            key = (row["search_id"], row["item_id"])
+            db.ex("UPDATE items SET reminded = 1 WHERE search_id = ? AND item_id = ?", key)   # nur ein Versuch
+            s = db.q1("SELECT * FROM searches WHERE id = ?", (row["search_id"],))
+            try:
+                item = await self._fresh_item(row, plz)
+            except EbayError as e:
+                log.warning("Erinnerung %s: %s", row["item_id"], e)
+                item = row   # lieber mit dem letzten bekannten Preis erinnern als gar nicht
+            if item is None or not notify.configured(settings):
+                continue
+            view = util.item_view(item, s, time.time())
+            try:
+                await notify.send(settings, **self._reminder_push(s, view, settings))
+                self.last_ntfy_error = None
+            except notify.NtfyError as e:
+                self.last_ntfy_error = str(e)
+                log.warning("ntfy: %s", e)
+
+    def _remind_url(self, settings: dict, s: dict, v: dict) -> str | None:
+        base = self._app_base(settings)
+        if not base:
+            return None
+        item_id = str(v["item_id"])
+        return (f"{base}/erinnern/{s['id']}/{quote(item_id, safe='')}"
+                f"?s={signed.sign('erinnern', s['id'], item_id)}")
+
+    def _reminder_push(self, s: dict, v: dict, settings: dict) -> dict:
+        name = util.short(s["name"] or s["query"], 40)
+        bids = v["bid_count"] or 0
+        price = f"{self._price_line(v, 'Aktuell', settings)}, {bids} {'Gebot' if bids == 1 else 'Gebote'}"
+        if not v["within"]:
+            return {   # still: Preis inzwischen über dem Limit
+                "title": f"Nicht mehr unter Limit: {name}",
+                "message": "\n".join([util.short(v["title"], 120), price, util.limit_text(s)]),
+                "click": v["url"], "priority": 2, "tags": ["chart_with_upwards_trend"],
+            }
+        lines = [util.short(v["title"], 120), price, *self._market_line(s, v, settings), util.limit_text(s), *v["flags"]]
+        return {
+            "title": f"Letzte Minute: {name}",
+            "message": "\n".join(lines),
+            "click": v["url"],
+            "image": self._image(settings, s, v),
+            "priority": 5,
+            "tags": ["rotating_light", "alarm_clock"],
+            "actions": [{"action": "view", "label": "Jetzt bei eBay bieten", "url": v["url"], "clear": True}],
+        }
 
     # ------------------------------------------------------------ Durchschnittspreis
 
@@ -356,10 +447,12 @@ class Watcher:
             try:
                 if len(views) > 1 and (not s["initialized"] or len(views) > MAX_SINGLE_PUSHES):
                     cheapest = min(views, key=lambda v: v["total"] or 0)
+                    shown = cheapest["gross"] if util.with_shipping(settings) else cheapest["rel_price"]
                     await notify.send(
                         settings,
                         title=f"{util.short(name, 40)}: {len(views)} Sofortkauf-Angebote unter Limit",
-                        message=(f"Das günstigste kostet {util.eur(cheapest['total'])}. "
+                        message=(f"Das günstigste kostet {util.eur(shown)}"
+                                 f"{' mit Versand' if util.with_shipping(settings) else ''}. "
                                  "Alle Angebote findest du in der Übersicht."),
                         click=self._app_link(settings, s),
                         priority=3,
@@ -393,21 +486,32 @@ class Watcher:
             return base + path
         return util.large_image(v["image"])
 
-    def _actions(self, settings: dict, s: dict, v: dict) -> list[dict]:
+    def _actions(self, settings: dict, s: dict, v: dict, remind: bool = False) -> list[dict]:
+        """Knöpfe der Benachrichtigung (ntfy erlaubt höchstens drei)."""
         actions = [{"action": "view", "label": "Bei eBay öffnen", "url": v["url"], "clear": True}]
+        remind_url = self._remind_url(settings, s, v) if remind else None
+        if remind_url:   # das Handy schickt den POST an Ebay Watcher, dafür muss es die Adresse erreichen
+            actions.append({"action": "http", "label": "1 Min vorher erinnern", "url": remind_url,
+                            "method": "POST", "clear": False})
         link = self._app_link(settings, s)
         if link:
             actions.append({"action": "view", "label": "In Ebay Watcher öffnen", "url": link})
         return actions
 
     @staticmethod
-    def _price_line(v: dict, label: str) -> str:
-        line = f"{label} {util.eur(v['rel_price'])}"
-        if v["show_shipping"]:
-            return f"{line} + {util.eur(v['shipping'])} Versand = {util.eur(v['total'])}"
-        if v["shipping_known"] and not v["shipping"] and not v["pickup_only"]:
-            return f"{line}, Versand kostenlos"
-        return line
+    def _price_line(v: dict, label: str, settings: dict) -> str:
+        """z. B. „Preis 43,99 € (39 € + 4,99 € Versand)“ oder ohne Versand-Anzeige „Preis 39 € zzgl. 4,99 € Versand“."""
+        price = util.eur(v["rel_price"])
+        if v.get("near") and v["shipping_known"] and v["shipping"] and not v["pickup_only"]:
+            return f"{label} {price} bei Abholung (sonst + {util.eur(v['shipping'])} Versand)"
+        if v["shipping_known"] and v["shipping"] and not v["pickup_only"]:
+            shipping = util.eur(v["shipping"])
+            if util.with_shipping(settings):
+                return f"{label} {util.eur(v['gross'])} ({price} + {shipping} Versand)"
+            return f"{label} {price} zzgl. {shipping} Versand"
+        if v["shipping_known"] and not v["pickup_only"]:
+            return f"{label} {price}, Versand kostenlos"
+        return f"{label} {price}"
 
     @staticmethod
     def _market_line(s: dict, v: dict, settings: dict) -> list[str]:
@@ -421,7 +525,7 @@ class Watcher:
         bids = v["bid_count"] or 0
         lines = [
             util.short(v["title"], 120),
-            f"{self._price_line(v, 'Aktuell')}, {bids} {'Gebot' if bids == 1 else 'Gebote'}",
+            f"{self._price_line(v, 'Aktuell', settings)}, {bids} {'Gebot' if bids == 1 else 'Gebote'}",
             *self._market_line(s, v, settings),
             util.limit_text(s),
             *v["flags"],
@@ -431,13 +535,13 @@ class Watcher:
             "message": "\n".join(lines),
             "click": v["url"],
             "image": self._image(settings, s, v),
-            "priority": 5,
+            "priority": 4,   # hoch; dringend (5) bleibt der Erinnerung 1 Minute vor Ende vorbehalten
             "tags": ["hourglass_flowing_sand"],
-            "actions": self._actions(settings, s, v),
+            "actions": self._actions(settings, s, v, remind=s["lead_minutes"] * 60 > self.REMIND_BEFORE + 60),
         }
 
     def _fixed_push(self, s: dict, v: dict, settings: dict) -> dict:
-        lines = [util.short(v["title"], 120), self._price_line(v, "Preis"), *self._market_line(s, v, settings),
+        lines = [util.short(v["title"], 120), self._price_line(v, "Preis", settings), *self._market_line(s, v, settings),
                  util.limit_text(s), *v["flags"]]
         return {
             "title": f"Sofortkauf unter Limit: {util.short(s['name'] or s['query'], 40)}",
@@ -464,7 +568,7 @@ class Watcher:
     @staticmethod
     def _update_item(sid: int, item_id: str, data: dict, now: float, reset_end: bool) -> None:
         sets = ", ".join(f"{c} = ?" for c in ITEM_FIELDS)
-        extra = ", end_checked = 0, notified_end = 0" if reset_end else ""
+        extra = ", end_checked = 0, notified_end = 0, reminded = 0" if reset_end else ""
         db.ex(
             f"UPDATE items SET {sets}, last_seen = ?, status = 'active'{extra} "
             "WHERE search_id = ? AND item_id = ?",

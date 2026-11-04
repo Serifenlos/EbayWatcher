@@ -78,6 +78,9 @@ CREATE TABLE IF NOT EXISTS items (
     pickup          INTEGER NOT NULL DEFAULT 0,
     pickup_only     INTEGER NOT NULL DEFAULT 0,
     distance_km     REAL,
+    near            INTEGER NOT NULL DEFAULT 0,       -- abholbar im eingestellten Umkreis
+    remind          INTEGER NOT NULL DEFAULT 0,       -- Knopf „1 Min vorher erinnern“ gedrückt
+    reminded        INTEGER NOT NULL DEFAULT 0,       -- Erinnerung ist erledigt
     epid            TEXT,                              -- Produkt im eBay-Katalog, falls verknüpft
     cond            TEXT,                              -- new | used | parts (für den Durchschnittspreis)
     first_seen      REAL NOT NULL,
@@ -145,6 +148,8 @@ DEFAULTS: dict[str, str] = {
     "ntfy_topic": "",
     "ntfy_token": "",
     "app_url": "",
+    # Anzeige: groß der Preis mit Versand, darunter Artikelpreis + Versand
+    "price_with_shipping": "1",
     # Durchschnittspreis (market.py)
     "market_enabled": "1",
     "market_threshold": "15",
@@ -175,6 +180,13 @@ def _migrate() -> None:
     for name in ("epid", "cond"):
         if name not in columns:
             ex(f"ALTER TABLE items ADD COLUMN {name} TEXT")
+    for name in ("remind", "reminded"):
+        if name not in columns:
+            ex(f"ALTER TABLE items ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0")
+    if "near" not in columns:
+        ex("ALTER TABLE items ADD COLUMN near INTEGER NOT NULL DEFAULT 0")
+        radius = setting_int(get_settings(), "radius_km", 50)
+        ex("UPDATE items SET near = 1 WHERE pickup = 1 AND (distance_km IS NULL OR distance_km <= ?)", (radius,))
     # Durchschnittspreis: aus der Momentaufnahme wird ein Preisverlauf
     columns = {r["name"] for r in q("PRAGMA table_info(market_items)")}
     for name, kind in (("end_time", "REAL"), ("first_seen", "REAL"), ("last_seen", "REAL"),

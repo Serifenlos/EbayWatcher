@@ -195,6 +195,14 @@
       "oAP" : "\/build\/app\/notify.py",
       "oF" : 1
     },
+    "\/source\/app\/signed.py" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 2,
+      "oAP" : "\/build\/app\/signed.py",
+      "oF" : 1
+    },
     "\/source\/app\/static\/css\/app.css" : {
       "aP" : 1,
       "ci" : 0,
@@ -366,7 +374,7 @@
     "displayValueWasSetByUser" : 0,
     "iconImageName" : "brackets-pale",
     "iconImageWasSetByUser" : 0,
-    "lastBuiltDate" : 815092839.04240894
+    "lastBuiltDate" : 815517146.190521
   },
   "projectSettings" : {
     "abortBuildOnError" : 1,

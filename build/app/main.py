@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, config, db, images, market, notify, util
+from . import auth, config, db, images, market, notify, signed, util
 from .watcher import Watcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -87,6 +87,7 @@ MESSAGES = {
     "ebay": "Verbindung zu eBay geprüft.",
     "hidden": "Angebot ausgeblendet.",
     "market": "Gespeichert. Neue Vergleichsangebote holt Ebay Watcher in den nächsten Minuten.",
+    "display": "Gespeichert.",
     "unhidden": "Angebot wieder eingeblendet.",
     "logout": "Du bist abgemeldet.",
 }
@@ -95,8 +96,8 @@ MESSAGES = {
 CSP = ("default-src 'self'; img-src 'self' data: https://*.ebayimg.com https://*.ebaystatic.com; "
        "style-src 'self'; script-src 'self'; "
        "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
-# /bild/ ohne Login, damit ntfy auf dem Handy die Bilder laden kann. Geschützt durch die Signatur.
-PUBLIC_PREFIXES = ("/login", "/static/", "/healthz", "/favicon", "/bild/")
+# /bild/ und /erinnern/ ohne Login: Sie ruft das Handy aus der Benachrichtigung auf. Geschützt durch die Signatur.
+PUBLIC_PREFIXES = ("/login", "/static/", "/healthz", "/favicon", "/bild/", "/erinnern/")
 
 
 # ---------------------------------------------------------------- Hilfen
@@ -145,6 +146,8 @@ def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLRe
     ctx.setdefault("flash_err", MESSAGES.get(request.query_params.get("err", "")))
     ctx.setdefault("active", "")
     ctx["signed_in"] = sess is not None
+    if sess is not None:
+        ctx.setdefault("prices_with_shipping", util.with_shipping(db.get_settings()))
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
 
 
@@ -196,6 +199,22 @@ async def csrf_failed(request: Request, _exc: CsrfFailed):
 @app.get("/healthz")
 async def healthz():
     return PlainTextResponse("ok")
+
+
+@app.post("/erinnern/{sid}/{item_id}")
+async def remind_item(request: Request, sid: int, item_id: str):
+    """Knopf „1 Min vorher erinnern“ in der Benachrichtigung (ntfy schickt dafür einen POST vom Handy)."""
+    if not signed.valid(request.query_params.get("s"), "erinnern", sid, item_id):
+        return PlainTextResponse("Ungültiger Link.", 403)
+    item = db.q1("SELECT * FROM items WHERE search_id = ? AND item_id = ?", (sid, item_id))
+    if not item or item["status"] != "active" or not item["end_time"]:
+        return PlainTextResponse("Das Angebot gibt es nicht mehr.", 404)
+    if item["end_time"] - time.time() <= Watcher.REMIND_BEFORE + 10:
+        return PlainTextResponse("Dafür ist es zu spät, die Auktion endet gleich.", 409)
+    db.ex("UPDATE items SET remind = 1, reminded = 0 WHERE search_id = ? AND item_id = ?", (sid, item_id))
+    watcher.poke()
+    return PlainTextResponse("Erinnerung gesetzt: 1 Minute vor Ende kommt ein Hinweis, "
+                             "wenn das Angebot dann noch unter deinem Limit liegt.")
 
 
 @app.api_route("/bild/{sid}/{item_id}", methods=["GET", "HEAD"])
@@ -347,6 +366,7 @@ async def dashboard(request: Request):
                              hidden.get(s["id"]))
         for s in searches
     ]
+    overviews.sort(key=util.dashboard_order)
     return render(request, "dashboard.html", active="searches", searches=overviews,
                   notices=_notices(), last_tick=watcher.last_tick, now=now)
 
@@ -593,6 +613,13 @@ async def save_general(request: Request):
     db.set_settings(values)
     watcher.poke()
     return back("/settings", "saved", anchor="standort")
+
+
+@app.post("/settings/display")
+async def save_display(request: Request):
+    form = await checked_form(request)
+    db.set_settings({"price_with_shipping": "1" if form.get("price_with_shipping") else "0"})
+    return back("/settings", "display", anchor="anzeige")
 
 
 @app.post("/settings/market")

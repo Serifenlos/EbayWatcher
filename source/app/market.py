@@ -171,6 +171,7 @@ class Comparison:
         self.threshold = threshold(settings)
         self.split = split_condition(settings)
         self.months = months(settings)
+        self.with_shipping = util.with_shipping(settings)   # wie die Anzeige: Ø neben dem angezeigten Preis
         self.ignore = set(tokens(search.get("query") or ""))
         keys = {search_key(search["id"])} | {k for k in (lookup_key(v) for v in views) if k}
         self.listings: dict[str, list[Listing]] = {}
@@ -206,7 +207,7 @@ class Comparison:
     def compare(self, v: dict) -> dict | None:
         """Ø für ein Angebot oder None, wenn es nicht genug Vergleich gibt."""
         cond = v.get("cond")
-        total = v.get("total")
+        total = v.get("gross") if self.with_shipping else v.get("rel_price")
         if total is None or cond == "parts" or (v.get("currency") and v["currency"] != "EUR"):
             return None
         epid = v.get("epid")
@@ -241,7 +242,7 @@ class Comparison:
         if len(same) < MIN_COMPARABLES:
             return None
 
-        with_shipping = bool(self.search.get("incl_shipping"))
+        with_shipping = self.with_shipping
 
         def price(c: Listing) -> float:
             return c.price + (c.shipping or 0) if with_shipping else c.price

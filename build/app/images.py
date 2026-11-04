@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import hmac
 import logging
 import os
 import secrets
@@ -24,7 +23,7 @@ from urllib.parse import quote, urljoin, urlsplit
 
 import httpx
 
-from . import config, db, util
+from . import config, db, signed, util
 
 log = logging.getLogger("ebay-watcher.bilder")
 
@@ -39,7 +38,6 @@ BROWSER_CACHE_SECONDS = 7 * 86400
 ALLOWED_HOSTS = (".ebayimg.com", ".ebaystatic.com")
 MAX_PARALLEL = 6                        # gleichzeitige Downloads bei eBay
 
-_secret: bytes | None = None
 _http: httpx.AsyncClient | None = None
 _locks: dict[str, asyncio.Lock] = {}
 _failed: dict[str, float] = {}
@@ -49,31 +47,17 @@ _last_cleanup = 0.0
 
 # ---------------------------------------------------------------- Adressen
 
-def _key() -> bytes:
-    """Geheimer Schlüssel für die Signaturen. Entsteht beim ersten Bild und bleibt in der Datenbank."""
-    global _secret
-    if _secret is None:
-        db.ex("INSERT INTO settings(key, value) VALUES ('image_secret', ?) ON CONFLICT(key) DO NOTHING",
-              (secrets.token_hex(32),))
-        _secret = db.q1("SELECT value FROM settings WHERE key = 'image_secret'")["value"].encode()
-    return _secret
-
-
-def _signature(search_id: int, item_id: str) -> str:
-    return hmac.new(_key(), f"{search_id}/{item_id}".encode(), hashlib.sha256).hexdigest()[:24]
-
-
 def url(search_id: int | None, item_id: str | None, image: str | None) -> str | None:
     """Adresse eines Artikelbildes in Ebay Watcher, z. B. /bild/3/v1%7C1234%7C0?v=…&s=…"""
     if not image or search_id is None or not item_id:
         return None
     version = hashlib.sha256(image.encode()).hexdigest()[:8]
     return (f"/bild/{search_id}/{quote(str(item_id), safe='')}"
-            f"?v={version}&s={_signature(search_id, str(item_id))}")
+            f"?v={version}&s={signed.sign(search_id, item_id)}")
 
 
 def valid(search_id: int, item_id: str, signature: str | None) -> bool:
-    return hmac.compare_digest(_signature(search_id, item_id).encode(), (signature or "").encode())
+    return signed.valid(signature, search_id, item_id)
 
 
 def source(search_id: int, item_id: str) -> str | None:

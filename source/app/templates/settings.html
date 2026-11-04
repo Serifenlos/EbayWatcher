@@ -58,8 +58,22 @@
     <div class="grid min-w-0 gap-2">
       <label class="{{ ui.label() }}" for="app_url">Adresse von Ebay Watcher <span class="font-normal text-muted">optional</span></label>
       <input class="{{ ui.input() }}" id="app_url" name="app_url" value="{{ s.app_url }}" placeholder="http://192.168.178.20:8765" autocomplete="off" {% if errors.app_url %}aria-invalid="true"{% endif %}>
-      <p class="{{ ui.hint() }}">Dann enthält jede Benachrichtigung auch einen Link zurück zu Ebay Watcher, und das Artikelbild kommt aus dem eigenen Bild-Cache statt von eBay. Das Handy muss diese Adresse erreichen können, sonst fehlt das Bild in der Benachrichtigung.</p>
+      <p class="{{ ui.hint() }}">Dann enthält jede Benachrichtigung auch einen Link zurück zu Ebay Watcher, das Artikelbild kommt aus dem eigenen Bild-Cache statt von eBay, und es gibt den Knopf „1 Min vorher erinnern“. Das Handy muss diese Adresse erreichen können, sonst fehlen Bild und Knopf.</p>
       {{ ui.error(errors, 'app_url') }}
+    </div>
+    <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button('primary') }}" type="submit">Speichern</button></div>
+  </form>
+</section>
+
+<section class="{{ panel }}" id="anzeige">
+  <div>
+    <h2>Anzeige</h2>
+    <p class="{{ panel_text }}">Gilt für alle Gesuche und die Benachrichtigungen. Ob ein Angebot unter dem Limit liegt, legt weiterhin jedes Gesuch fest.</p>
+  </div>
+  <form class="{{ stack }}" method="post" action="/settings/display">
+    {{ ui.csrf_field(csrf) }}
+    <div class="grid">
+      {{ ui.switch('price_with_shipping', 'Preise mit Versand anzeigen', 'Groß steht der Preis mit Versand, darunter klein Artikelpreis und Versand. Ausgeschaltet steht groß nur der Artikelpreis.', s.price_with_shipping == '1') }}
     </div>
     <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button('primary') }}" type="submit">Speichern</button></div>
   </form>

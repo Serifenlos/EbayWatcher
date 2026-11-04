@@ -5,10 +5,11 @@
   v.market: Durchschnittspreis aus market.py (fehlt, wenn es nicht genug Vergleich gibt).
 #}
 {% import "includes/ui.html" as ui %}
+{% set shown = v.gross if prices_with_shipping else v.rel_price %}{# angezeigter Preis, siehe Einstellungen → Anzeige #}
 <li class="flex items-start gap-2 border-b border-line md:items-center {{ 'opacity-70' if kind == 'over' }}"
     data-offer
     data-sort-end="{{ v.end_time|int if v.end_time else '' }}"
-    data-sort-price="{{ v.total if v.total is not none else '' }}"
+    data-sort-price="{{ shown if shown is not none else '' }}"
     data-sort-new="{{ v.first_seen|int if v.first_seen else '' }}"
     data-sort-distance="{{ v.distance_km if v.distance_km is not none else '' }}">
   <a class="group/offer grid min-w-0 grow grid-cols-[68px_minmax(0,1fr)] items-start gap-x-4 gap-y-2 py-4 text-inherit no-underline md:grid-cols-[84px_minmax(0,1fr)_minmax(170px,230px)] md:items-center md:gap-5 {{ 'opacity-60' if kind == 'hidden' }}"
@@ -18,13 +19,17 @@
     </span>
     <span class="grid min-w-0 gap-0.75">
       <span class="line-clamp-2 leading-[1.35] font-medium group-hover/offer:underline group-hover/offer:decoration-1 group-hover/offer:underline-offset-3">{{ v.title }}</span>
-      <span class="text-sm text-muted">{{ v.kind }}{% if v.auction %}, {{ v.bid_count or 0 }} {{ 'Gebot' if v.bid_count == 1 else 'Gebote' }}{% endif %}{% if v.location_text %}, {{ v.location_text }}{% endif %}</span>
+      <span class="text-sm text-muted">{{ v.kind }}{% if v.auction %}, {{ v.bid_count or 0 }} {{ 'Gebot' if v.bid_count == 1 else 'Gebote' }}{% endif %}</span>
       {% for flag in v.flags %}<span class="text-meta font-medium text-tight">{{ flag }}</span>{% endfor %}
     </span>
     <span class="col-start-2 grid justify-items-start gap-1 text-left md:col-start-auto md:justify-items-end md:text-right">
-      {% if v.total is not none %}
-      <span class="{{ ui.num() }} text-section font-semibold">{{ eur(v.total) }}</span>
-      {% if v.show_shipping %}<span class="text-meta text-muted">{{ eur(v.rel_price) }} + {{ eur(v.shipping) }} Versand</span>
+      {% if shown is not none %}
+      {# Groß der Preis mit Versand (Einstellungen → Anzeige), darunter klein, woraus er besteht #}
+      <span class="{{ ui.num() }} text-section font-semibold">{{ eur(shown) }}</span>
+      {% if v.near and v.shipping_known and v.shipping and not v.pickup_only %}
+      <span class="text-meta text-muted">bei Abholung, sonst + {{ eur(v.shipping) }} Versand</span>
+      {% elif v.shipping_known and v.shipping and not v.pickup_only %}
+      <span class="text-meta text-muted">{% if prices_with_shipping %}{{ eur(v.rel_price) }} + {{ eur(v.shipping) }} Versand{% else %}zzgl. {{ eur(v.shipping) }} Versand{% endif %}</span>
       {% elif v.shipping_known and not v.shipping and not v.pickup_only %}<span class="text-meta text-muted">Versand kostenlos</span>{% endif %}
       {{ ui.limit_line(v.ratio, 'max-w-45') }}
       {% if v.market %}{% set m = v.market %}
@@ -36,6 +41,7 @@
       {% endif %}
       {% endif %}
       {% if v.auction and v.end_time %}<span class="text-meta text-muted">Endet in {{ ui.countdown_span(v.end_time, now) }}</span>{% endif %}
+      {% if v.auction and v.remind and not v.reminded %}<span class="text-meta font-medium text-accent">Erinnerung 1 Min vor Ende</span>{% endif %}
     </span>
   </a>
   {% if kind == 'hidden' %}

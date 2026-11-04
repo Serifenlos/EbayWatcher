@@ -218,6 +218,7 @@ def parse_listing(d: dict, pickup: bool = False) -> dict:
         "pickup": int(pickup),
         "pickup_only": pickup_only,
         "distance_km": distance,
+        "near": 0,   # setzt der Watcher, er kennt den Umkreis
         "epid": d.get("epid") or None,
         "cond": condition_class(d.get("conditionId")),
     }
@@ -238,10 +239,11 @@ def relevant_price(item: dict, search: dict) -> float | None:
 
 
 def total_price(item: dict, search: dict) -> float | None:
+    """Preis für das Limit. Abholbar im Umkreis: ohne Versand, man holt es ja ab."""
     base = relevant_price(item, search)
     if base is None:
         return None
-    if search["incl_shipping"] and item["shipping_known"] and item["shipping"]:
+    if search["incl_shipping"] and item["shipping_known"] and item["shipping"] and not item.get("near"):
         return base + item["shipping"]
     return base
 
@@ -254,13 +256,15 @@ def within_limit(item: dict, search: dict) -> bool:
 
 
 def item_flags(item: dict) -> list[str]:
+    """Hinweise unter dem Titel. Der Standort erscheint nur, wenn er zählt: bei „Nur Abholung“
+    (immer) und bei Angeboten, die man im eingestellten Umkreis abholen kann."""
     flags = []
-    if item["pickup"]:
-        label = "Nur Abholung" if item["pickup_only"] else "Abholung möglich"
-        if item.get("distance_km") is not None:
-            label += f", {round(item['distance_km'])} km entfernt"
-        flags.append(label)
-    elif not item["shipping_known"]:
+    distance = f", {round(item['distance_km'])} km entfernt" if item.get("distance_km") is not None else ""
+    if item["pickup_only"]:
+        flags.append("Nur Abholung" + distance)
+    elif item.get("near"):
+        flags.append("Abholung möglich" + distance)
+    if not item["pickup_only"] and not item["shipping_known"]:
         flags.append("Versandkosten unbekannt")
     country = item.get("country")
     if country and country not in EU:
@@ -268,6 +272,21 @@ def item_flags(item: dict) -> list[str]:
     if item.get("currency") and item["currency"] != "EUR":
         flags.append(f"Preis in {item['currency']}")
     return flags
+
+
+def with_shipping(settings: dict) -> bool:
+    """Preise mit Versand anzeigen (Einstellungen → Anzeige)? Gilt für die Anzeige, nicht für das Limit."""
+    return settings.get("price_with_shipping", "1") == "1"
+
+
+def gross_price(item: dict, search: dict) -> float | None:
+    """Was man zahlt: Preis plus Versand, soweit bekannt. Abholbar im Umkreis: ohne Versand."""
+    base = relevant_price(item, search)
+    if base is None:
+        return None
+    if item.get("near"):
+        return base
+    return base + (item["shipping"] or 0) if item["shipping_known"] else base
 
 
 def item_view(item: dict, search: dict, now: float) -> dict:
@@ -279,11 +298,11 @@ def item_view(item: dict, search: dict, now: float) -> dict:
         "kind": "Auktion" if auction else "Sofortkauf",
         "auction": auction,
         "rel_price": relevant_price(item, search),
-        "total": total,
+        "total": total,                       # Preis für das Limit (mit oder ohne Versand je nach Gesuch)
+        "gross": gross_price(item, search),   # Preis mit Versand für die Anzeige
         "ratio": (total or 0) / maxp,
         "within": within_limit(item, search),
         "flags": item_flags(item),
-        "show_shipping": bool(search["incl_shipping"] and item["shipping_known"] and item["shipping"]),
         "ends_in": (item["end_time"] - now) if item.get("end_time") else None,
     }
 
@@ -320,6 +339,14 @@ def search_overview(search: dict, items: list[dict], now: float, hidden: set[str
     }
 
 
+def dashboard_order(overview: dict) -> tuple:
+    """Reihenfolge der Startseite: zuerst die Gesuche, deren nächste Auktion unter dem Limit am
+    frühesten endet; dann aktive ohne laufende Auktion (neueste zuerst); pausierte zuletzt."""
+    f = overview["feature"]
+    end = f["end_time"] if f and f["auction"] and f.get("end_time") else None
+    return (not overview["active"], end is None, end or 0, -(overview.get("created_at") or 0))
+
+
 def hidden_view(row: dict, item: dict | None, search: dict, now: float) -> dict:
     """Eintrag für die Liste „Ausgeblendet“. Gibt es das Angebot nicht mehr, reicht die gespeicherte Kopie."""
     if item:
@@ -332,8 +359,8 @@ def hidden_view(row: dict, item: dict | None, search: dict, now: float) -> dict:
             "search_id": row["search_id"], "item_id": row["item_id"], "title": row["title"] or "",
             "url": row["url"] or "", "image": row["image"], "kind": "Beendet",
             "auction": False, "total": None, "rel_price": None, "ratio": 0.0, "within": False,
-            "flags": [], "show_shipping": False, "shipping_known": 0, "shipping": None,
-            "pickup_only": 0, "bid_count": None, "location_text": "", "end_time": None,
+            "flags": [], "shipping_known": 0, "shipping": None, "gross": None,
+            "pickup_only": 0, "near": 0, "bid_count": None, "location_text": "", "end_time": None,
             "first_seen": row["hidden_at"], "distance_km": None,
         }
     view["hidden_at"] = row["hidden_at"]

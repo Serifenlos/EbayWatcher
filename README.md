@@ -2,7 +2,7 @@
 
 Ebay Watcher überwacht eBay-Gesuche und schickt über [ntfy](https://ntfy.sh) eine Push-Nachricht aufs Handy,
 
-- wenn eine Auktion kurz vor Ende (Standard: 10 Minuten) noch unter deinem Höchstpreis liegt,
+- wenn eine Auktion kurz vor Ende (Standard: 10 Minuten) noch unter deinem Höchstpreis liegt; über den Knopf „1 Min vorher erinnern“ kommt eine Minute vor Schluss ein zweiter, dringender Hinweis, falls der Preis dann noch passt,
 - wenn ein Sofortkauf-Angebot unter deinem Höchstpreis neu auftaucht.
 
 Es nutzt die offizielle eBay Browse API und läuft als einzelner Docker-Container ohne weitere Dienste, zum Beispiel auf einem NAS.
@@ -12,10 +12,10 @@ Es nutzt die offizielle eBay Browse API und läuft als einzelner Docker-Containe
 ## Was es kann
 
 - Beliebig viele Gesuche mit Suchbegriff, Ausschlusswörtern, Angebotsformat (Auktion, Sofortkauf, beides), Standort (Deutschland, EU, weltweit) und Zustand
-- Höchstpreis wahlweise mit oder ohne Versandkosten, Option „nur versandkostenfrei“
+- Höchstpreis wahlweise mit oder ohne Versandkosten, Option „nur versandkostenfrei“; Preise werden mit Versand angezeigt (darunter Artikelpreis und Versand), abschaltbar
 - Es werden nur Angebote berücksichtigt, die nach Deutschland versendet werden; bei Angeboten außerhalb der EU weist die Benachrichtigung auf möglichen Zoll hin
-- Angebote nur zur Abholung: im Umkreis deiner Postleitzahl, alle mit Entfernung markiert, oder ausgeblendet
-- Startseite mit allen Gesuchen als Karten oder Liste, hell oder dunkel nach Systemeinstellung
+- Angebote nur zur Abholung: im Umkreis deiner Postleitzahl, alle mit Entfernung markiert, oder ausgeblendet. Angebote, die du im Umkreis abholen kannst, sind markiert und zählen ohne Versandkosten, auch beim Limit
+- Startseite mit allen Gesuchen als Karten oder Liste, sortiert nach der nächsten endenden Auktion, hell oder dunkel nach Systemeinstellung
 - Treffer sortierbar nach Endzeit, Preis, Einstelldatum oder Entfernung; unpassende Angebote lassen sich ausblenden und werden dann auch nicht mehr gemeldet
 - Durchschnittspreis (Ø) neben jedem Angebot: Vergleich mit den Sofortkauf-Angeboten desselben Produkts der letzten Monate, auf Wunsch getrennt nach neu und gebraucht; deutlich günstigere Angebote sind grün markiert
 - Sicherer Login: Argon2-Passwort-Hash, Sperre nach Fehlversuchen, „Angemeldet bleiben“ für 3 Monate, optional Zwei-Faktor per Authenticator-App, Übersicht und Abmeldung aller Geräte
@@ -127,5 +127,6 @@ Bei einem öffentlichen ntfy-Server wie `ntfy.sh` kann jeder mitlesen, der den T
 
 - **eBay begrenzt die Abfragen pro Tag** (für die Browse API standardmäßig 5.000). Wie viele heute verbraucht sind, zeigt Ebay Watcher unter *Einstellungen → eBay-Verbindung*. Bei vielen Gesuchen hilft ein längeres Suchintervall.
 - **Durchschnittspreis:** Verkaufte Preise gibt die eBay-API nicht heraus. Der Ø ist deshalb der Median der Sofortkauf-Angebote desselben Produkts, also ein Angebotspreis. Ebay Watcher merkt sich die Angebote, die es dabei sieht, und zählt alle, die im eingestellten Zeitraum (Vorgabe 6 Monate) zu sehen waren, jedes nur einmal. So wächst der Vergleich mit der Zeit, ohne zusätzliche Abfragen. Angebote, die vor ihrem Ende verschwinden, weist Ebay Watcher als vermutlich verkauft aus. Als dasselbe Produkt gelten Angebote mit gleicher eBay-Katalognummer, gleicher Artikelnummer im Titel (etwa `87 01 250` oder `576982`) oder sehr ähnlichem Titel. Gibt es weniger als drei Vergleichsangebote, steht kein Ø da. Dafür braucht Ebay Watcher pro Gesuch eine Abfrage am Tag und für Angebote mit Artikel- oder Katalognummer gezielte Abfragen, deren Zahl pro Tag du unter *Einstellungen → Durchschnittspreis* begrenzt.
+- **Knöpfe in der Benachrichtigung:** „1 Min vorher erinnern“ erscheint nur, wenn unter *Einstellungen → Standort und Suche* die **Adresse von Ebay Watcher** eingetragen ist. Beim Tippen schickt das Handy eine Anfrage an diese Adresse, es muss sie also erreichen können.
 - **Bilder:** Jedes Artikelbild lädt Ebay Watcher nur einmal bei eBay und speichert es im Datenordner unter `cache/bilder`. Bilder, die 14 Tage nicht angezeigt wurden, löscht es von selbst, und insgesamt belegt der Ordner höchstens etwa 200 MB. Ist unter *Einstellungen → Standort und Suche* die **Adresse von Ebay Watcher** eingetragen, kommen auch die Bilder in den Benachrichtigungen aus diesem Cache. Das Handy muss diese Adresse dann erreichen können, sonst fehlt das Bild in der Benachrichtigung.
 - **Datenschutz:** Ebay Watcher speichert nur Artikelnummer, Titel, Artikelbild, Preise, Versandkosten, Standort-Land und Endzeit der gefundenen Angebote. Daten über Verkäufer oder Käufer werden nicht gespeichert. Beendete Angebote werden nach sieben Tagen gelöscht.
