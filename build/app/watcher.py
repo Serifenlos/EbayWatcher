@@ -1,7 +1,8 @@
 """Hintergrundprüfung.
 
 Zwei getrennte Abläufe:
-* Entdecken: jedes aktive Gesuch wird im eingestellten Intervall nach neuen Angeboten durchsucht.
+* Entdecken: jedes aktive Gesuch wird im eingestellten Intervall (oder seinem eigenen) nach neuen
+  Angeboten durchsucht. Abholangebote im Umkreis werden höchstens einmal pro Stunde gesucht.
 * Endspurt: jede gemerkte Auktion wird genau einmal X Minuten vor ihrem Ende geprüft. Hat man in der
   Benachrichtigung „1 Min vorher erinnern“ gedrückt, wird sie 1 Minute vor Ende noch einmal geprüft.
 Sofortkauf-Angebote unter dem Limit werden direkt beim Entdecken gemeldet.
@@ -26,6 +27,8 @@ PICKUP_RADIUS_ALL_KM = 1000    # Abholmodus "alle anzeigen": praktisch ganz Deut
 MAX_END_LOOKUPS = 15           # fehlende Endzeiten pro Lauf über getItem nachladen
 MARKET_EVERY = 300             # Durchschnittspreis: alle 5 Minuten nachsehen, ob etwas zu holen ist …
 MARKET_LOOKUPS_PER_RUN = 3     # … und dann höchstens so viele gezielte Abfragen auf einmal
+PICKUP_EVERY = 3600            # Abholsuche höchstens stündlich; Abholangebote ändern sich selten
+SPLIT_FOR = 6 * 3600           # „Beides“ mit mehr als 200 Treffern: so lange gleich getrennt suchen
 
 ITEM_FIELDS = [
     "title", "url", "image", "is_auction", "has_bin", "price", "bin_price", "currency",
@@ -47,6 +50,8 @@ class Watcher:
         self.last_ebay_check: dict | None = None
         self.last_ntfy_error: str | None = None
         self._market_next = 0.0
+        self._pickup_runs: dict[int, float] = {}    # Gesuch → letzte Abholsuche
+        self._split_until: dict[int, float] = {}    # Gesuch → bis dann Auktion und Sofortkauf getrennt suchen
 
     # ------------------------------------------------------------ Lebenszyklus
 
@@ -62,6 +67,16 @@ class Watcher:
 
     def poke(self) -> None:
         self.wake.set()
+
+    def forget_pickup(self) -> None:
+        """PLZ oder Umkreis geändert: beim nächsten Lauf jedes Gesuchs auch die Abholsuche machen."""
+        self._pickup_runs.clear()
+
+    @staticmethod
+    def interval_seconds(s: dict, settings: dict) -> int:
+        """Suchintervall eines Gesuchs: sein eigenes, sonst das aus den Einstellungen."""
+        minutes = s.get("interval_minutes") or db.setting_int(settings, "interval_minutes", 15)
+        return max(5, minutes) * 60
 
     async def _loop(self) -> None:
         await asyncio.sleep(3)
@@ -96,9 +111,8 @@ class Watcher:
         settings = db.get_settings()
         await self.check_endings(settings)
         await self.check_reminders(settings)
-        interval = max(5, db.setting_int(settings, "interval_minutes", 15)) * 60
         for s in db.q("SELECT * FROM searches WHERE active = 1 ORDER BY id"):
-            if s["last_run"] is None or time.time() - s["last_run"] >= interval:
+            if s["last_run"] is None or time.time() - s["last_run"] >= self.interval_seconds(s, settings):
                 await self.discover(s, settings)
                 await self.check_endings(settings)
         await self.update_market(settings)
@@ -121,28 +135,49 @@ class Watcher:
             "EU": "itemLocationRegion:EUROPEAN_UNION",
         }.get(s["location"], "itemLocationRegion:WORLDWIDE")
 
+    async def _search_shipped(self, s: dict, formats: list[str], plz: str, now: float) -> list[dict]:
+        """Angebote mit Versand nach Deutschland. Bei „Beides“ möglichst mit einer Abfrage für beide
+        Formate: passen alle Treffer auf eine Seite (bis 200), reicht sie. Sonst getrennt, Auktionen nach
+        Ende sortiert, Sofortkauf nach Neuheit, je bis zu 3 Seiten."""
+        def filters(fmts: list[str]) -> list[str]:
+            f = self._base_filters(s) + [
+                self._location_filter(s),
+                "buyingOptions:{" + "|".join(fmts) + "}",
+                "deliveryCountry:DE",  # nur Angebote, die nach Deutschland versendet werden
+            ]
+            if s["free_shipping_only"]:
+                f.append("maxDeliveryCost:0")
+            return f
+
+        found: list[dict] = []
+        if len(formats) > 1 and now >= self._split_until.get(s["id"], 0):
+            together = await self.ebay.search(s["query"], filters(formats), None, plz, max_pages=1)
+            if getattr(together, "complete", True):
+                return list(together)
+            self._split_until[s["id"]] = now + SPLIT_FOR   # zu viele Treffer: eine Weile gleich getrennt
+            found.extend(together)
+        for fmt in formats:
+            sort = "endingSoonest" if fmt == "AUCTION" else "newlyListed"
+            found.extend(await self.ebay.search(s["query"], filters([fmt]), sort, plz))
+        return found
+
     async def discover(self, s: dict, settings: dict) -> None:
         now = time.time()
         plz = (settings.get("plz") or "").strip()
         radius = db.setting_int(settings, "radius_km", 50)
         formats = FORMATS.get(s["format"], ["AUCTION"])
+        pickup_wanted = s["pickup_mode"] != "hide" and bool(plz)
+        pickup_now = pickup_wanted and (s["last_run"] is None
+                                        or now - self._pickup_runs.get(s["id"], 0) >= PICKUP_EVERY)
+        keep_pickup = pickup_wanted and not pickup_now   # dazwischen gilt, was die letzte Abholsuche fand
         found: dict[str, tuple[dict, bool]] = {}
 
         try:
-            for fmt in formats:
-                filters = self._base_filters(s) + [
-                    self._location_filter(s),
-                    f"buyingOptions:{{{fmt}}}",
-                    "deliveryCountry:DE",  # nur Angebote, die nach Deutschland versendet werden
-                ]
-                if s["free_shipping_only"]:
-                    filters.append("maxDeliveryCost:0")
-                sort = "endingSoonest" if fmt == "AUCTION" else "newlyListed"
-                for summary in await self.ebay.search(s["query"], filters, sort, plz):
-                    if summary.get("itemId"):
-                        found[summary["itemId"]] = (summary, False)
+            for summary in await self._search_shipped(s, formats, plz, now):
+                if summary.get("itemId"):
+                    found[summary["itemId"]] = (summary, False)
 
-            if s["pickup_mode"] != "hide" and plz:
+            if pickup_now:
                 search_radius = radius if s["pickup_mode"] == "radius" else PICKUP_RADIUS_ALL_KM
                 filters = self._base_filters(s) + [
                     "buyingOptions:{" + "|".join(formats) + "}",
@@ -160,6 +195,8 @@ class Watcher:
             log.warning("Gesuch %s: %s", s["id"], e)
             db.ex("UPDATE searches SET last_run = ?, last_error = ? WHERE id = ?", (now, str(e), s["id"]))
             return
+        if pickup_now:
+            self._pickup_runs[s["id"]] = now
 
         excluded = util.exclusion_words(s["exclude"])
         hidden = db.hidden_ids(s["id"])   # von Hand ausgeblendet: weiter aktualisieren, aber nie melden
@@ -169,7 +206,12 @@ class Watcher:
         as_fixed = {**s, "format": "fixed"}
 
         for item_id, (summary, pickup) in found.items():
+            existing = db.q1("SELECT * FROM items WHERE search_id = ? AND item_id = ?", (s["id"], item_id))
+            if keep_pickup and existing and existing["pickup"]:
+                pickup = True   # ohne Abholsuche: Abholung und Entfernung von der letzten übernehmen
             data = util.parse_listing(summary, pickup)
+            if pickup and data["distance_km"] is None and existing:
+                data["distance_km"] = existing["distance_km"]
             # Abholbar im eingestellten Umkreis: dann zählt der Preis ohne Versand
             distance = data["distance_km"]
             data["near"] = int(bool(pickup) and (distance <= radius if distance is not None
@@ -179,7 +221,6 @@ class Watcher:
                 continue
             seen.add(item_id)
 
-            existing = db.q1("SELECT * FROM items WHERE search_id = ? AND item_id = ?", (s["id"], item_id))
             if existing:
                 if data["end_time"] is None:
                     data["end_time"] = existing["end_time"]
@@ -199,9 +240,10 @@ class Watcher:
                 if view["within"]:
                     new_fixed.append(view)
 
-        # Nicht mehr gefunden: über Limit, beendet oder Filter geändert
-        for row in db.q("SELECT item_id FROM items WHERE search_id = ? AND status = 'active'", (s["id"],)):
-            if row["item_id"] not in seen:
+        # Nicht mehr gefunden: über Limit, beendet oder Filter geändert. Abholangebote prüft erst die
+        # nächste Abholsuche.
+        for row in db.q("SELECT item_id, pickup FROM items WHERE search_id = ? AND status = 'active'", (s["id"],)):
+            if row["item_id"] not in seen and not (keep_pickup and row["pickup"]):
                 db.ex("UPDATE items SET status = 'dropped' WHERE search_id = ? AND item_id = ?",
                       (s["id"], row["item_id"]))
 
@@ -245,7 +287,7 @@ class Watcher:
             if not s:
                 continue
             try:
-                item = await self._fresh_item(row, plz)
+                item = await self._fresh_item(row, plz, "endspurt")
             except EbayError as e:
                 log.warning("Endspurt-Prüfung %s: %s", row["item_id"], e)
                 return  # beim nächsten Takt erneut versuchen
@@ -275,9 +317,9 @@ class Watcher:
                 (1 if view["within"] else 0, *key),
             )
 
-    async def _fresh_item(self, row: dict, plz: str) -> dict | None:
+    async def _fresh_item(self, row: dict, plz: str, purpose: str) -> dict | None:
         """Aktueller Stand eines gemerkten Angebots über getItem (eine Abfrage). None: bei eBay nicht mehr da."""
-        detail = await self.ebay.get_item(row["item_id"], plz)
+        detail = await self.ebay.get_item(row["item_id"], plz, purpose=purpose)
         if detail is None:
             db.ex("UPDATE items SET status = 'gone' WHERE search_id = ? AND item_id = ?",
                   (row["search_id"], row["item_id"]))
@@ -319,7 +361,7 @@ class Watcher:
             db.ex("UPDATE items SET reminded = 1 WHERE search_id = ? AND item_id = ?", key)   # nur ein Versuch
             s = db.q1("SELECT * FROM searches WHERE id = ?", (row["search_id"],))
             try:
-                item = await self._fresh_item(row, plz)
+                item = await self._fresh_item(row, plz, "erinnerung")
             except EbayError as e:
                 log.warning("Erinnerung %s: %s", row["item_id"], e)
                 item = row   # lieber mit dem letzten bekannten Preis erinnern als gar nicht
@@ -412,7 +454,8 @@ class Watcher:
     async def _fetch_market(self, key: str, q: str | None, filters: list[str], plz: str,
                             exclude: str = "", extra: dict | None = None) -> None:
         try:
-            summaries = await self.ebay.search(q, filters, None, plz, max_pages=1, extra=extra)
+            summaries = await self.ebay.search(q, filters, None, plz, max_pages=1, extra=extra,
+                                               purpose="durchschnitt")
         except EbayError as e:
             log.info("Durchschnittspreis %s: %s", key, e)
             market.store(key, None)

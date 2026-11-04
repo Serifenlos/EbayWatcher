@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import auth, config, db, images, market, notify, signed, util
+from .ebay import PURPOSES
 from .watcher import Watcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -377,14 +378,16 @@ def _form_defaults(settings: dict) -> dict:
     return {
         "name": "", "query": "", "exclude": "", "format": "auction", "location": "DE",
         "max_price_raw": "", "incl_shipping": 1, "free_shipping_only": 0, "condition": "any",
-        "lead_raw": str(db.setting_int(settings, "lead_minutes", 10)), "pickup_mode": "radius", "active": 1,
+        "lead_raw": str(db.setting_int(settings, "lead_minutes", 10)), "interval_raw": "",
+        "pickup_mode": "radius", "active": 1,
     }
 
 
 def _values_from_search(s: dict) -> dict:
     price = s["max_price"]
     raw = f"{price:.0f}" if float(price).is_integer() else f"{price:.2f}".replace(".", ",")
-    return {**s, "max_price_raw": raw, "lead_raw": str(s["lead_minutes"])}
+    return {**s, "max_price_raw": raw, "lead_raw": str(s["lead_minutes"]),
+            "interval_raw": str(s["interval_minutes"] or "")}
 
 
 def _parse_search_form(form) -> tuple[dict, dict]:
@@ -405,6 +408,7 @@ def _parse_search_form(form) -> tuple[dict, dict]:
         "active": 1 if form.get("active") else 0,
         "max_price_raw": str(form.get("max_price", "")).strip()[:20],
         "lead_raw": str(form.get("lead_minutes", "")).strip()[:5],
+        "interval_raw": str(form.get("interval_minutes", "")).strip()[:5],
     }
     errors = {}
     if len(v["query"]) < 2:
@@ -419,11 +423,17 @@ def _parse_search_form(form) -> tuple[dict, dict]:
     except ValueError:
         errors["lead_minutes"] = "Wähle 1 bis 180 Minuten."
         v["lead_minutes"] = 10
+    v["interval_minutes"] = None   # leer: Suchintervall aus den Einstellungen
+    if v["interval_raw"]:
+        if v["interval_raw"].isdigit() and 5 <= int(v["interval_raw"]) <= 240:
+            v["interval_minutes"] = int(v["interval_raw"])
+        else:
+            errors["interval_minutes"] = "Wähle 5 bis 240 Minuten oder lass das Feld leer."
     return v, errors
 
 
 SEARCH_COLUMNS = ["name", "query", "exclude", "format", "location", "max_price", "incl_shipping",
-                  "free_shipping_only", "condition", "lead_minutes", "pickup_mode", "active"]
+                  "free_shipping_only", "condition", "lead_minutes", "interval_minutes", "pickup_mode", "active"]
 
 
 def _render_form(request: Request, values: dict, errors: dict, mode: str, sid: int | None = None,
@@ -431,7 +441,8 @@ def _render_form(request: Request, values: dict, errors: dict, mode: str, sid: i
     settings = db.get_settings()
     return render(request, "search_form.html", status_code=status, active="searches", values=values,
                   errors=errors, mode=mode, sid=sid, has_plz=bool(settings["plz"]),
-                  radius=db.setting_int(settings, "radius_km", 50))
+                  radius=db.setting_int(settings, "radius_km", 50),
+                  interval_default=db.setting_int(settings, "interval_minutes", 15))
 
 
 @app.get("/searches/new", response_class=HTMLResponse)
@@ -587,8 +598,16 @@ def _settings_page(request: Request, errors: dict | None = None, values: dict | 
     return render(request, "settings.html", status_code=status, active="settings", s=s, user=user,
                   errors=errors or {}, sessions=sessions, ebay_configured=watcher.ebay.configured,
                   ebay_check=watcher.last_ebay_check, ntfy_error=watcher.last_ntfy_error,
-                  api_calls=db.api_calls_today(), has_token=bool(s.get("ntfy_token")),
+                  api_calls=db.api_calls_today(), api_purposes=_api_purposes(),
+                  api_calls_yesterday=sum(db.api_calls_by_purpose(1).values()), has_token=bool(s.get("ntfy_token")),
                   image_cache=images.stats(), market_lookups_today=market.lookups_today())
+
+
+def _api_purposes() -> list[tuple[str, int]]:
+    """Heutige Abfragen nach Zweck, in fester Reihenfolge, nur Zwecke mit Abfragen."""
+    calls = db.api_calls_by_purpose()
+    labels = {**PURPOSES, "ohne": "Vor dem Update, ohne Zuordnung"}
+    return [(label, calls[key]) for key, label in labels.items() if calls.get(key)]
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -610,6 +629,9 @@ async def save_general(request: Request):
         errors["app_url"] = "Die Adresse beginnt mit http:// oder https://."
     if errors:
         return _settings_page(request, errors, values, 422)
+    old = db.get_settings()
+    if (old["plz"], old["radius_km"]) != (values["plz"], values["radius_km"]):
+        watcher.forget_pickup()   # Abholangebote gleich neu suchen, nicht erst nach einer Stunde
     db.set_settings(values)
     watcher.poke()
     return back("/settings", "saved", anchor="standort")

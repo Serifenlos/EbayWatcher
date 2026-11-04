@@ -2,11 +2,29 @@
   Liste von Angeboten. Wird direkt in die Detailseite eingebunden oder beim Aufklappen
   einer eingeklappten Liste nachgeladen (GET /searches/<id>/list/over bzw. /hidden).
   Erwartet: offers, kind ("matches", "over" oder "hidden"), sid, csrf, now
+
+  Seiten: app.js zeigt je Seite nur einen Teil der Angebote (Vorgabe 20) und blendet die Leiste
+  darunter ein, wenn die Liste länger ist. Ohne JavaScript stehen alle Angebote untereinander.
 #}
+{% import "includes/ui.html" as ui %}
 {% if offers %}
-<ol class="mt-2 border-t border-line" data-sortable>
+<ol class="mt-2 scroll-mt-6 border-t border-line" data-sortable>
   {% for v in offers %}{% include "includes/offer.html" %}{% endfor %}
 </ol>
+<nav class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3" data-pager hidden aria-label="Seiten">
+  <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+    <div class="inline-flex max-w-full gap-0.5 overflow-x-auto rounded-control bg-tile p-0.75" data-pages></div>
+    <span class="{{ ui.num() }} text-meta text-muted" data-range></span>
+  </div>
+  <label class="flex items-center gap-2 text-meta text-muted">
+    <input class="{{ ui.num() }} h-9 w-18 rounded-control border border-line bg-surface px-2.5 text-center text-ui text-ink focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent-soft"
+           type="number" min="1" max="200" step="1" inputmode="numeric" data-page-size aria-label="Angebote pro Seite">
+    pro Seite
+  </label>
+  {# Vorlagen für die Knöpfe, app.js klont sie (so stehen alle Klassen hier im Template) #}
+  <template data-page-button><button type="button" class="{{ ui.segment() }} min-w-9 text-center {{ ui.num() }} aria-[current=page]:border-line aria-[current=page]:bg-surface aria-[current=page]:text-ink disabled:cursor-default disabled:opacity-40"></button></template>
+  <template data-page-gap><span class="self-center px-1.5 text-sm text-muted" aria-hidden="true">…</span></template>
+</nav>
 {% elif kind == 'hidden' %}
 <p class="mt-1.5 mb-3 text-muted">Keine ausgeblendeten Angebote.</p>
 {% else %}

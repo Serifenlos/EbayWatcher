@@ -51,7 +51,7 @@
           <input class="{{ ui.input('unit') }}" id="interval_minutes" name="interval_minutes" value="{{ s.interval_minutes }}" inputmode="numeric" {% if errors.interval_minutes %}aria-invalid="true"{% endif %}>
           <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">Min</span>
         </div>
-        <p class="{{ ui.hint() }}">So oft wird nach neuen Angeboten gesucht.</p>
+        <p class="{{ ui.hint() }}">So oft wird nach neuen Angeboten gesucht. Im Gesuch unter „Weitere Optionen“ kannst du ein eigenes Intervall festlegen.</p>
         {{ ui.error(errors, 'interval_minutes') }}
       </div>
     </div>
@@ -235,6 +235,21 @@
     <dl class="grid gap-2.5">
       <div class="{{ fact }}"><dt class="text-muted">Zugangsdaten</dt><dd class="text-right">{{ 'Hinterlegt' if ebay_configured else 'Fehlen' }}</dd></div>
       <div class="{{ fact }}"><dt class="text-muted">Abfragen heute</dt><dd class="{{ ui.num() }} text-right">{{ api_calls }}</dd></div>
+      {% if api_purposes %}
+      <div class="border-b border-line pb-2.5">
+        <dt class="sr-only">Davon</dt>
+        <dd>
+          <ul class="grid gap-1 text-sm">
+            {% for label, calls in api_purposes %}
+            <li class="flex justify-between gap-4 pl-3"><span class="text-muted">{{ label }}</span><span class="{{ ui.num() }}">{{ calls }}</span></li>
+            {% endfor %}
+          </ul>
+        </dd>
+      </div>
+      {% endif %}
+      {% if api_calls_yesterday %}
+      <div class="{{ fact }}"><dt class="text-muted">Abfragen gestern</dt><dd class="{{ ui.num() }} text-right">{{ api_calls_yesterday }}</dd></div>
+      {% endif %}
       {% if ebay_check %}
         {% if ebay_check.ok %}
           {% if ebay_check.remaining is not none %}

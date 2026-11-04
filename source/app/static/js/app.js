@@ -81,6 +81,117 @@
   setInterval(tick, 15000);
 
   // ------------------------------------------------------------------
+  // Seiten: lange Listen zeigen nur einen Teil der Angebote (Vorgabe 20, Feld „pro Seite“, auf diesem
+  // Gerät gemerkt). Ausgeblendete Zeilen laden ihre Bilder erst, wenn ihre Seite drankommt.
+
+  var PAGE_KEY = "ebay-watcher-page-size";
+  var DEFAULT_PAGE_SIZE = 20;
+
+  function savedPageSize() {
+    try {
+      var n = parseInt(localStorage.getItem(PAGE_KEY), 10);
+      return n >= 1 && n <= 200 ? n : DEFAULT_PAGE_SIZE;
+    } catch (error) {
+      console.info("Ebay Watcher: Seitengröße nicht lesbar (" + error.name + ")");
+      return DEFAULT_PAGE_SIZE;
+    }
+  }
+
+  function rememberPageSize(n) {
+    try {
+      localStorage.setItem(PAGE_KEY, String(n));
+    } catch (error) {
+      console.info("Ebay Watcher: Seitengröße wird nicht gespeichert (" + error.name + ")");
+    }
+  }
+
+  var pageSize = savedPageSize();
+
+  function pagerOf(list) {
+    var next = list.nextElementSibling;
+    return next && next.hasAttribute("data-pager") ? next : null;
+  }
+
+  // Seitenzahlen: erste, letzte und die beiden Nachbarn der aktuellen, dazwischen „…“
+  function pageNumbers(page, pages) {
+    var out = [];
+    for (var p = 1; p <= pages; p++) {
+      if (p === 1 || p === pages || Math.abs(p - page) <= 1) {
+        out.push(p);
+      } else if (out[out.length - 1] !== 0) {
+        out.push(0);
+      }
+    }
+    return out;
+  }
+
+  function pageButton(pager, text, label, target, current) {
+    var button = pager.querySelector("template[data-page-button]").content.firstElementChild.cloneNode(true);
+    button.textContent = text;
+    button.setAttribute("aria-label", label);
+    if (current) button.setAttribute("aria-current", "page");
+    if (target === null) {
+      button.disabled = true;
+    } else {
+      button.dataset.page = String(target);
+    }
+    return button;
+  }
+
+  function paginate(list, page) {
+    var pager = pagerOf(list);
+    if (!pager) return;
+    var rows = list.querySelectorAll(":scope > li[data-offer]");
+    var pages = Math.max(1, Math.ceil(rows.length / pageSize));
+    var current = Math.min(Math.max(1, page || Number(list.dataset.page) || 1), pages);
+    list.dataset.page = String(current);
+    rows.forEach(function (row, i) {
+      row.hidden = i < (current - 1) * pageSize || i >= current * pageSize;
+    });
+
+    pager.hidden = rows.length <= pageSize;
+    pager.querySelector("[data-page-size]").value = String(pageSize);
+    var first = (current - 1) * pageSize + 1;
+    pager.querySelector("[data-range]").textContent =
+      first + "–" + Math.min(current * pageSize, rows.length) + " von " + rows.length;
+
+    var box = pager.querySelector("[data-pages]");
+    box.textContent = "";
+    box.appendChild(pageButton(pager, "‹", "Vorige Seite", current > 1 ? current - 1 : null, false));
+    pageNumbers(current, pages).forEach(function (p) {
+      if (p === 0) {
+        box.appendChild(pager.querySelector("template[data-page-gap]").content.firstElementChild.cloneNode(true));
+      } else {
+        box.appendChild(pageButton(pager, String(p), "Seite " + p, p, p === current));
+      }
+    });
+    box.appendChild(pageButton(pager, "›", "Nächste Seite", current < pages ? current + 1 : null, false));
+  }
+
+  function bindPagers(root) {
+    root.querySelectorAll("ol[data-sortable]").forEach(function (list) {
+      var pager = pagerOf(list);
+      if (!pager) return;
+      pager.querySelector("[data-pages]").addEventListener("click", function (event) {
+        var button = event.target.closest("button[data-page]");
+        if (!button) return;
+        paginate(list, Number(button.dataset.page));
+        if (list.getBoundingClientRect().top < 0) list.scrollIntoView();
+      });
+      pager.querySelector("[data-page-size]").addEventListener("change", function (event) {
+        var n = parseInt(event.target.value, 10);
+        if (!(n >= 1)) n = DEFAULT_PAGE_SIZE;
+        pageSize = Math.min(200, n);
+        rememberPageSize(pageSize);
+        document.querySelectorAll("ol[data-sortable]").forEach(function (other) { paginate(other, 1); });
+      });
+      paginate(list, 1);
+    });
+  }
+
+  bindPagers(document);
+
+  // ------------------------------------------------------------------
   // Detailseite: Angebote sortieren (wird auf diesem Gerät gemerkt).
   // Jede Zeile trägt data-sort-end, data-sort-price, data-sort-new und data-sort-distance.
 
@@ -141,6 +252,7 @@
     (root || document).querySelectorAll("ol[data-sortable]").forEach(function (list) {
       var rows = Array.prototype.slice.call(list.querySelectorAll(":scope > li[data-offer]"));
       rows.sort(compareBy(rules)).forEach(function (row) { list.appendChild(row); });
+      paginate(list, 1);
     });
   }
 
@@ -174,6 +286,7 @@
       })
       .then(function (html) {
         target.innerHTML = html;
+        bindPagers(target);
         applySort(currentSort(), target);
         bindHideForms(target);
         tick();
@@ -206,7 +319,9 @@
           .then(function (response) {
             if (!response.ok) throw new Error("HTTP " + response.status);
             var list = row.closest("[data-list]");
+            var ol = row.parentElement;
             row.remove();
+            paginate(ol);
             if (list) changeCount(list.dataset.list, -1);
             var hiddenFold = document.getElementById("ausgeblendet");
             if (hiddenFold) {

@@ -16,8 +16,26 @@ API = "https://api.ebay.com"
 SCOPE = "https://api.ebay.com/oauth/api_scope"
 
 
+PAGE_SIZE = 200
+
+# Wofür eine Abfrage war (Einstellungen → eBay-Verbindung zeigt die Abfragen danach aufgeschlüsselt)
+PURPOSES = {"suche": "Suche nach neuen Angeboten", "endspurt": "Endspurt vor Auktionsende",
+            "erinnerung": "Erinnerung 1 Min vor Ende", "durchschnitt": "Durchschnittspreis"}
+
+
 class EbayError(Exception):
     pass
+
+
+class Results(list):
+    """Gefundene Angebote. total: so viele gibt es laut eBay insgesamt."""
+
+    total = 0
+
+    @property
+    def complete(self) -> bool:
+        """Alle Treffer geholt (nicht nach max_pages abgeschnitten)."""
+        return len(self) >= self.total
 
 
 def _error_text(r: httpx.Response) -> str:
@@ -74,11 +92,12 @@ class EbayClient:
             "Accept-Language": "de-DE",
         }
 
-    async def _get(self, path: str, params: dict | None = None, plz: str = "", count: bool = True) -> httpx.Response:
+    async def _get(self, path: str, params: dict | None = None, plz: str = "",
+                   purpose: str | None = "suche") -> httpx.Response:
         for attempt in (1, 2):
             token = await self._token_value()
-            if count:
-                db.count_api_call()
+            if purpose:
+                db.count_api_call(purpose)
             try:
                 r = await self._http.get(API + path, params=params, headers=self._headers(token, plz))
             except httpx.HTTPError as e:
@@ -90,30 +109,34 @@ class EbayClient:
         return r
 
     async def search(self, q: str | None, filters: list[str], sort: str | None = None,
-                     plz: str = "", max_pages: int = 3, extra: dict | None = None) -> list[dict]:
-        """Angebotssuche. extra: weitere Parameter, z. B. {"epid": …} für ein Produkt aus dem eBay-Katalog
-        (dann ohne Suchbegriff)."""
-        items: list[dict] = []
+                     plz: str = "", max_pages: int = 3, extra: dict | None = None,
+                     purpose: str = "suche") -> Results:
+        """Angebotssuche, je Seite eine Abfrage. extra: weitere Parameter, z. B. {"epid": …} für ein
+        Produkt aus dem eBay-Katalog (dann ohne Suchbegriff)."""
+        items = Results()
         offset = 0
         for _ in range(max_pages):
-            params = {"filter": ",".join(filters), "limit": "200", "offset": str(offset), **(extra or {})}
+            params = {"filter": ",".join(filters), "limit": str(PAGE_SIZE), "offset": str(offset), **(extra or {})}
             if q:
                 params["q"] = q
             if sort:
                 params["sort"] = sort
-            r = await self._get("/buy/browse/v1/item_summary/search", params, plz)
+            r = await self._get("/buy/browse/v1/item_summary/search", params, plz, purpose)
             if r.status_code != 200:
                 raise EbayError(_error_text(r))
             data = r.json()
             batch = data.get("itemSummaries") or []
             items.extend(batch)
             offset += len(batch)
-            if not batch or not data.get("next") or offset >= int(data.get("total") or 0):
+            total = int(data.get("total") or 0)
+            if not batch or not data.get("next") or offset >= total:
+                items.total = len(items)   # alles geholt
                 break
+            items.total = max(total, len(items))   # es gäbe weitere Seiten
         return items
 
-    async def get_item(self, item_id: str, plz: str = "") -> dict | None:
-        r = await self._get("/buy/browse/v1/item/" + urllib.parse.quote(item_id, safe=""), plz=plz)
+    async def get_item(self, item_id: str, plz: str = "", purpose: str = "suche") -> dict | None:
+        r = await self._get("/buy/browse/v1/item/" + urllib.parse.quote(item_id, safe=""), plz=plz, purpose=purpose)
         if r.status_code == 404:
             return None
         if r.status_code != 200:
@@ -123,7 +146,7 @@ class EbayClient:
     async def rate_limits(self) -> dict:
         """Kontingent der Browse API laut eBay (Developer Analytics API)."""
         r = await self._get("/developer/analytics/v1_beta/rate_limit/",
-                            {"api_context": "buy", "api_name": "Browse"}, count=False)
+                            {"api_context": "buy", "api_name": "Browse"}, purpose=None)
         if r.status_code != 200:
             raise EbayError(_error_text(r))
         for limit in r.json().get("rateLimits") or []:

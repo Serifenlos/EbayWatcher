@@ -68,9 +68,19 @@
     {% if not has_plz %}<p class="{{ ui.hint('warn') }}">Dafür braucht Ebay Watcher deine Postleitzahl. <a href="/settings#standort">PLZ eintragen</a></p>{% endif %}
   </fieldset>
 
-  <details class="group/more border-y border-line py-3.5" {% if values.exclude or values.name %}open{% endif %}>
+  <details class="group/more border-y border-line py-3.5" {% if values.exclude or values.name or values.interval_raw or errors.interval_minutes %}open{% endif %}>
     <summary class="flex cursor-pointer list-none justify-between font-medium [&::-webkit-details-marker]:hidden after:text-xl after:leading-none after:text-muted after:content-['+'] group-open/more:mb-4.5 group-open/more:after:content-['–']">Weitere Optionen</summary>
     <div class="grid min-w-0 gap-2">
+      <label class="{{ ui.label() }}" for="interval_minutes">Eigenes Suchintervall</label>
+      <div class="relative max-w-50">
+        <input class="{{ ui.input('unit') }}" id="interval_minutes" name="interval_minutes" inputmode="numeric" value="{{ values.interval_raw }}" placeholder="{{ interval_default }}"
+               {% if errors.interval_minutes %}aria-invalid="true" aria-describedby="interval_minutes-error"{% endif %}>
+        <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">Minuten</span>
+      </div>
+      {{ ui.error(errors, 'interval_minutes') }}
+      <p class="{{ ui.hint() }}">Leer lassen, dann gilt die Einstellung ({{ interval_default }} Minuten). Seltener suchen spart eBay-Abfragen. Bei reinen Auktionen reichen meist 60 Minuten: Die Erinnerung vor Auktionsende kommt trotzdem pünktlich, weil Ebay Watcher jede gemerkte Auktion kurz vor Ende eigens prüft.</p>
+    </div>
+    <div class="mt-5 grid min-w-0 gap-2">
       <label class="{{ ui.label() }}" for="exclude">Ausschließen, wenn der Titel enthält</label>
       <input class="{{ ui.input() }}" id="exclude" name="exclude" value="{{ values.exclude }}" placeholder="defekt, Ersatzteil, Bastler" autocomplete="off">
       <p class="{{ ui.hint() }}">Mehrere Wörter mit Komma trennen.</p>

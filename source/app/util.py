@@ -114,7 +114,18 @@ def describe_search(s: dict) -> str:
         parts.append(cond)
     if s.get("free_shipping_only"):
         parts.append("nur versandkostenfrei")
+    if s.get("interval_minutes"):
+        parts.append(interval_text(s["interval_minutes"]))
     return ", ".join(parts)
+
+
+def interval_text(minutes: int) -> str:
+    """Eigenes Suchintervall eines Gesuchs, z. B. „sucht stündlich“."""
+    if minutes == 60:
+        return "sucht stündlich"
+    if minutes % 60 == 0:
+        return f"sucht alle {minutes // 60} Std."
+    return f"sucht alle {minutes} Min."
 
 
 def limit_text(s: dict) -> str:

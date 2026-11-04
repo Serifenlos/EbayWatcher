@@ -4,7 +4,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from . import config
@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS searches (
     free_shipping_only  INTEGER NOT NULL DEFAULT 0,
     condition           TEXT NOT NULL DEFAULT 'any',       -- any | new | used
     lead_minutes        INTEGER NOT NULL DEFAULT 10,
+    interval_minutes    INTEGER,                           -- eigenes Suchintervall, leer: Einstellung
     pickup_mode         TEXT NOT NULL DEFAULT 'radius',    -- radius | all | hide
     active              INTEGER NOT NULL DEFAULT 1,
     initialized         INTEGER NOT NULL DEFAULT 0,
@@ -137,6 +138,14 @@ CREATE TABLE IF NOT EXISTS api_usage (
     day    TEXT PRIMARY KEY,
     calls  INTEGER NOT NULL DEFAULT 0
 );
+
+-- dieselben Abfragen nach Zweck (ebay.PURPOSES)
+CREATE TABLE IF NOT EXISTS api_calls (
+    day      TEXT NOT NULL,
+    purpose  TEXT NOT NULL,
+    calls    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, purpose)
+);
 """
 
 DEFAULTS: dict[str, str] = {
@@ -176,6 +185,8 @@ def init() -> None:
 
 def _migrate() -> None:
     """Spalten, die nach der ersten Version dazugekommen sind, in bestehenden Datenbanken ergänzen."""
+    if "interval_minutes" not in {r["name"] for r in q("PRAGMA table_info(searches)")}:
+        ex("ALTER TABLE searches ADD COLUMN interval_minutes INTEGER")
     columns = {r["name"] for r in q("PRAGMA table_info(items)")}
     for name in ("epid", "cond"):
         if name not in columns:
@@ -256,21 +267,33 @@ def hidden_ids_by_search() -> dict[int, set[str]]:
 
 # ---------------------------------------------------------------- API-Zähler
 
-def _today() -> str:
-    return datetime.now(ZoneInfo(config.TZ)).date().isoformat()
+def _today(days_back: int = 0) -> str:
+    return (datetime.now(ZoneInfo(config.TZ)).date() - timedelta(days=days_back)).isoformat()
 
 
-def count_api_call(n: int = 1) -> None:
-    ex(
-        "INSERT INTO api_usage(day, calls) VALUES(?, ?) "
-        "ON CONFLICT(day) DO UPDATE SET calls = calls + ?",
-        (_today(), n, n),
-    )
+def count_api_call(purpose: str = "suche", n: int = 1) -> None:
+    day = _today()
+    with _lock:
+        ex("INSERT INTO api_usage(day, calls) VALUES(?, ?) ON CONFLICT(day) DO UPDATE SET calls = calls + ?",
+           (day, n, n))
+        ex("INSERT INTO api_calls(day, purpose, calls) VALUES(?, ?, ?) "
+           "ON CONFLICT(day, purpose) DO UPDATE SET calls = calls + ?", (day, purpose, n, n))
 
 
 def api_calls_today() -> int:
     row = q1("SELECT calls FROM api_usage WHERE day = ?", (_today(),))
     return row["calls"] if row else 0
+
+
+def api_calls_by_purpose(days_back: int = 0) -> dict[str, int]:
+    """Abfragen eines Tages nach Zweck; „ohne Zuordnung“ sind Abfragen von vor dem Update."""
+    day = _today(days_back)
+    result = {r["purpose"]: r["calls"] for r in q("SELECT purpose, calls FROM api_calls WHERE day = ?", (day,))}
+    row = q1("SELECT calls FROM api_usage WHERE day = ?", (day,))
+    rest = (row["calls"] if row else 0) - sum(result.values())
+    if rest > 0:
+        result["ohne"] = rest
+    return result
 
 
 # ---------------------------------------------------------------- Aufräumen
@@ -291,3 +314,4 @@ def prune() -> None:
         (now - 30 * 86400,),
     )
     ex("DELETE FROM api_usage WHERE day < date('now', '-60 day')")
+    ex("DELETE FROM api_calls WHERE day < date('now', '-60 day')")
