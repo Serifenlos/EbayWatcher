@@ -6,7 +6,7 @@
  * Die fertige Datei enthält nur die Klassen, die in den Templates wirklich vorkommen.
  *
  * Aufbau dieser Datei:
- *   1. Tailwind laden und festlegen, welche Dateien nach Klassen durchsucht werden
+ *   1. Tailwind und die Stile der Bilder-Galerie (PhotoSwipe) laden, festlegen, welche Dateien nach Klassen durchsucht werden
  *   2. Design-Tokens (Farben, Schriften, Größen) – daraus entstehen Klassen wie bg-surface oder text-meta
  *   3. Dunkelmodus: dieselben Tokens mit dunklen Werten
  *   4. Eigene Varianten für die Ansicht „Karten“ und „Liste“
@@ -21,6 +21,13 @@
 
 /* source(none): Tailwind sucht nicht selbst im ganzen Projekt, sondern nur in den Ordnern unten. */
 @import "tailwindcss" source(none);
+
+/*
+ * Bilder-Galerie: Stile von PhotoSwipe direkt aus dem CodeKit-Paket (node_modules/photoswipe, Version in
+ * package.json). Tailwind fügt die Datei beim Übersetzen ein. Ohne Ebene (layer), damit sie Tailwinds
+ * Grundstile wie img { max-width: 100% } schlägt.
+ */
+@import "photoswipe/dist/photoswipe.css";
 
 @source "../../templates";   /* source/app/templates – alle Jinja-Templates */
 @source "../js";             /* source/app/static/js  – Klassen und Attribute, die JavaScript setzt */

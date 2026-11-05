@@ -31,7 +31,7 @@ PICKUP_EVERY = 3600            # Abholsuche höchstens stündlich; Abholangebote
 SPLIT_FOR = 6 * 3600           # „Beides“ mit mehr als 200 Treffern: so lange gleich getrennt suchen
 
 ITEM_FIELDS = [
-    "title", "url", "image", "is_auction", "has_bin", "price", "bin_price", "currency",
+    "title", "url", "image", "images", "is_auction", "has_bin", "price", "bin_price", "currency",
     "shipping", "shipping_known", "bid_count", "end_time", "country", "location_text",
     "pickup", "pickup_only", "distance_km", "near", "epid", "cond",
 ]
@@ -332,7 +332,7 @@ class Watcher:
             fresh["shipping"], fresh["shipping_known"] = 0.0, 1
         elif not fresh["shipping_known"] and row["shipping_known"]:
             fresh["shipping"], fresh["shipping_known"] = row["shipping"], 1
-        for field in ("end_time", "image", "url", "title", "epid", "cond"):
+        for field in ("end_time", "image", "images", "url", "title", "epid", "cond"):
             if not fresh[field]:
                 fresh[field] = row[field]
         self._update_item(row["search_id"], row["item_id"], fresh, time.time(), reset_end=False)

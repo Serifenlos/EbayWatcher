@@ -339,6 +339,101 @@
   bindHideForms(document);
 
   // ------------------------------------------------------------------
+  // Bilder-Galerie: Klick aufs Vorschaubild zeigt alle Bilder des Angebots (PhotoSwipe, photoswipe.com).
+  // /galerie/… liefert Adressen und Maße der Bilder aus dem Bild-Cache. PhotoSwipe selbst (js/photoswipe.js,
+  // gebündelt aus node_modules) lädt erst beim ersten Klick, die Adresse steht in <body data-photoswipe>.
+  // Ohne JavaScript führt das Bild zu eBay.
+
+  var GALLERY_OPTIONS = {
+    bgOpacity: 0.92,
+    showHideAnimationType: "fade",
+    wheelToZoom: true,
+    preload: [1, 2],
+    closeTitle: "Schließen (Esc)",
+    zoomTitle: "Vergrößern (Z)",
+    arrowPrevTitle: "Vorheriges Bild",
+    arrowNextTitle: "Nächstes Bild",
+    errorMsg: "Dieses Bild lässt sich gerade nicht laden.",
+    indexIndicatorSep: " / "
+  };
+  // Knopf „Bei eBay öffnen“ oben in der Galerie (Pfeil aus dem Kasten, 32er-Raster wie die PhotoSwipe-Symbole)
+  var EBAY_ICON = '<path id="pswp__icn-ebay" d="M9 11h6v2h-4v8h8v-4h2v6H9zM17 9h6v6h-2v-2.6l-5.3 5.3-1.4-1.4 5.3-5.3H17z"/>';
+  var photoSwipe = null;
+
+  function loadPhotoSwipe() {
+    if (!photoSwipe) {
+      photoSwipe = new window.Promise(function (resolve, reject) {
+        var script = document.createElement("script");
+        script.src = document.body.dataset.photoswipe;
+        script.onload = function () {
+          if (window.PhotoSwipe) resolve(window.PhotoSwipe);
+          else reject(new Error("PhotoSwipe fehlt"));
+        };
+        script.onerror = function () {
+          photoSwipe = null;
+          reject(new Error("PhotoSwipe nicht geladen"));
+        };
+        document.head.appendChild(script);
+      });
+    }
+    return photoSwipe;
+  }
+
+  function loadImages(link) {
+    return fetch(link.dataset.gallery, { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.json();
+      });
+  }
+
+  function openGallery(link) {
+    var thumb = link.querySelector("img");
+    link.setAttribute("aria-busy", "true");
+    window.Promise.all([loadPhotoSwipe(), loadImages(link)])
+      .then(function (results) {
+        var PhotoSwipe = results[0];
+        var items = results[1].items || [];
+        if (!items.length) throw new Error("keine Bilder");
+        if (thumb) items[0].msrc = thumb.currentSrc || thumb.src;   // Vorschaubild, bis das große Bild da ist
+        var pswp = new PhotoSwipe(Object.assign({ dataSource: items }, GALLERY_OPTIONS));
+        pswp.on("uiRegister", function () {
+          pswp.ui.registerElement({
+            name: "ebay",
+            order: 9,
+            isButton: true,
+            tagName: "a",
+            title: "Bei eBay öffnen",
+            ariaLabel: "Bei eBay öffnen",
+            html: { isCustomSVG: true, inner: EBAY_ICON, outlineID: "pswp__icn-ebay" },
+            onInit: function (el) {
+              el.href = link.href;
+              el.target = "_blank";
+              el.rel = "noopener noreferrer";
+            }
+          });
+        });
+        pswp.init();
+      })
+      .catch(function (error) {
+        // Ohne Galerie wenigstens das Angebot bei eBay zeigen, wie ohne JavaScript
+        console.info("Ebay Watcher: Galerie nicht verfügbar (" + error.message + ")");
+        var tab = window.open(link.href, "_blank");
+        if (tab) tab.opener = null;
+        else window.location.assign(link.href);   // Pop-up gesperrt: dann eben in diesem Tab
+      })
+      .then(function () { link.removeAttribute("aria-busy"); });
+  }
+
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest ? event.target.closest("a[data-gallery]") : null;
+    if (!link || !document.body.dataset.photoswipe) return;
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;   // neuer Tab: eBay
+    event.preventDefault();
+    if (link.getAttribute("aria-busy") !== "true") openGallery(link);
+  });
+
+  // ------------------------------------------------------------------
   // Sicherheitsabfrage vor dem Löschen
 
   document.querySelectorAll("form[data-confirm]").forEach(function (form) {

@@ -235,6 +235,17 @@
       "sC" : 3,
       "tS" : 0
     },
+    "\/source\/app\/static\/js\/photoswipe.js" : {
+      "bF" : 0,
+      "ft" : 64,
+      "ma" : 0,
+      "mi" : 1,
+      "oA" : 0,
+      "oAP" : "\/build\/app\/static\/js\/photoswipe-min.js",
+      "oF" : 0,
+      "sC" : 3,
+      "tS" : 0
+    },
     "\/source\/app\/templates\/base.html" : {
       "cB" : 0,
       "ft" : 8192,
@@ -374,7 +385,7 @@
     "displayValueWasSetByUser" : 0,
     "iconImageName" : "brackets-pale",
     "iconImageWasSetByUser" : 0,
-    "lastBuiltDate" : 815519204.751405
+    "lastBuiltDate" : 815559634.22930002
   },
   "projectSettings" : {
     "abortBuildOnError" : 1,

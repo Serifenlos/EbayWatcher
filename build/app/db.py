@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS items (
     title           TEXT,
     url             TEXT,
     image           TEXT,
+    images          TEXT,                  -- alle Bildadressen bei eBay als JSON-Liste (für die Galerie)
     is_auction      INTEGER NOT NULL DEFAULT 0,
     has_bin         INTEGER NOT NULL DEFAULT 0,
     price           REAL,
@@ -188,7 +189,7 @@ def _migrate() -> None:
     if "interval_minutes" not in {r["name"] for r in q("PRAGMA table_info(searches)")}:
         ex("ALTER TABLE searches ADD COLUMN interval_minutes INTEGER")
     columns = {r["name"] for r in q("PRAGMA table_info(items)")}
-    for name in ("epid", "cond"):
+    for name in ("epid", "cond", "images"):
         if name not in columns:
             ex(f"ALTER TABLE items ADD COLUMN {name} TEXT")
     for name in ("remind", "reminded"):

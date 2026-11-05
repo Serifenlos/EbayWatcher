@@ -1,6 +1,7 @@
 """Weboberfläche von Ebay Watcher."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
@@ -11,7 +12,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -65,9 +66,14 @@ def image_url(v: dict) -> str | None:
     return images.url(v.get("search_id"), v.get("item_id"), v.get("image"))
 
 
+def gallery_url(v: dict) -> str:
+    """Bilder eines Angebots für die Galerie (Klick aufs Vorschaubild, siehe app.js)."""
+    return f"/galerie/{v['search_id']}/{quote(str(v['item_id']), safe='')}"
+
+
 templates.env.globals.update(
     eur=util.eur, countdown=util.countdown, local_time=util.local_time, ago=util.ago,
-    gauge=util.gauge, asset=asset, image_url=image_url, app_name=config.APP_NAME,
+    gauge=util.gauge, asset=asset, image_url=image_url, gallery_url=gallery_url, app_name=config.APP_NAME,
     app_version=config.APP_VERSION, repo_url=config.REPO_URL,
 )
 
@@ -220,10 +226,14 @@ async def remind_item(request: Request, sid: int, item_id: str):
 
 @app.api_route("/bild/{sid}/{item_id}", methods=["GET", "HEAD"])
 async def article_image(request: Request, sid: int, item_id: str):
-    """Artikelbild aus dem Bild-Cache. Beim ersten Abruf lädt Ebay Watcher es einmal bei eBay."""
+    """Artikelbild aus dem Bild-Cache. Beim ersten Abruf lädt Ebay Watcher es einmal bei eBay.
+    n: Nummer des Bildes (Galerie), g=1: groß."""
     if not images.valid(sid, item_id, request.query_params.get("s")):
         return PlainTextResponse("Ungültige Bildadresse.", 403)
-    address = images.source(sid, item_id)
+    n = request.query_params.get("n", "0")
+    if not n.isdigit():
+        return PlainTextResponse("Bild nicht gefunden.", 404)
+    address = images.source(sid, item_id, int(n), request.query_params.get("g") == "1")
     if not address or not images.allowed(address):
         return PlainTextResponse("Bild nicht gefunden.", 404)
     path = await images.cached(address)
@@ -232,6 +242,23 @@ async def article_image(request: Request, sid: int, item_id: str):
         return RedirectResponse(address, 302, headers={"Cache-Control": "no-store"})
     return FileResponse(path, media_type=images.media_type(path),
                         headers={"Cache-Control": f"private, max-age={images.BROWSER_CACHE_SECONDS}"})
+
+
+@app.get("/galerie/{sid}/{item_id}")
+async def gallery(sid: int, item_id: str):
+    """Bilder eines Angebots für die Galerie (PhotoSwipe, siehe app.js), mit Breite und Höhe.
+    Beim ersten Öffnen lädt Ebay Watcher alle Bilder groß bei eBay und legt sie in den Bild-Cache."""
+    found = images.originals(sid, item_id)
+    if not found:
+        return JSONResponse({"items": []}, 404)
+    paths = await asyncio.gather(*(images.cached(images.source(sid, item_id, n, big=True))
+                                   for n in range(len(found))))
+    items = []
+    for n, (original, path) in enumerate(zip(found, paths)):
+        size = images.dimensions(path) if path else None
+        if size:   # Bilder, die eBay gerade nicht liefert, fehlen in der Galerie
+            items.append({"src": images.url(sid, item_id, original, n, big=True), "width": size[0], "height": size[1]})
+    return JSONResponse({"items": items}, headers={"Cache-Control": "no-store"})
 
 
 # ---------------------------------------------------------------- Anmeldung

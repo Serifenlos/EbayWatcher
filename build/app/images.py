@@ -1,13 +1,14 @@
 """Bild-Cache: Artikelbilder einmal bei eBay holen und danach selbst ausliefern.
 
 * Seiten und Benachrichtigungen verweisen auf /bild/<Gesuch>/<Artikel>?v=…&s=… statt auf eBay.
+  Die Galerie (Klick aufs Vorschaubild) nutzt dieselbe Adresse mit &n=<Nummer des Bildes>&g=1 für groß.
 * s ist eine Signatur. Gültig sind nur Adressen, die Ebay Watcher selbst erzeugt hat. Deshalb kommt die
   Adresse ohne Login aus (ntfy auf dem Handy kann das Bild laden), lässt sich aber nicht für fremde
   Artikel oder Seiten missbrauchen. v ändert sich, wenn der Verkäufer das Bild austauscht.
-* Die eBay-Adresse des Bildes steht in der eigenen Datenbank. Geladen wird nur von eBay-Servern,
-  immer in 500 px Breite.
+* Die eBay-Adressen der Bilder stehen in der eigenen Datenbank. Geladen wird nur von eBay-Servern,
+  für Listen und Benachrichtigungen in 500 px, für die Galerie in 1600 px.
 * Die Dateien liegen im Datenordner unter cache/bilder. Die stündliche Pflege löscht Bilder, die
-  14 Tage nicht angezeigt wurden, und hält den Ordner unter 200 MB.
+  14 Tage nicht angezeigt wurden, und hält den Ordner unter 500 MB.
 * Klappt das Laden nicht, schickt Ebay Watcher den Browser direkt zu eBay (wie ohne Cache).
 """
 from __future__ import annotations
@@ -15,8 +16,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import json
 import os
 import secrets
+import struct
 import time
 from pathlib import Path
 from urllib.parse import quote, urljoin, urlsplit
@@ -29,14 +32,16 @@ log = logging.getLogger("ebay-watcher.bilder")
 
 CACHE_DIR = config.DATA_DIR / "cache" / "bilder"
 KEEP_DAYS = 14                          # so lange nicht angezeigt, dann wird ein Bild gelöscht
-MAX_CACHE_BYTES = 200 * 1024 * 1024     # Obergrenze für den ganzen Ordner …
-TRIM_TO_BYTES = 180 * 1024 * 1024       # … beim Überschreiten bis hierhin aufräumen, die ältesten zuerst
+MAX_CACHE_BYTES = 500 * 1024 * 1024     # Obergrenze für den ganzen Ordner …
+TRIM_TO_BYTES = 450 * 1024 * 1024       # … beim Überschreiten bis hierhin aufräumen, die ältesten zuerst
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 RETRY_SECONDS = 3600                    # nach einem Fehlschlag frühestens nach einer Stunde neu versuchen
 CLEANUP_SECONDS = 3600
 BROWSER_CACHE_SECONDS = 7 * 86400
 ALLOWED_HOSTS = (".ebayimg.com", ".ebaystatic.com")
 MAX_PARALLEL = 6                        # gleichzeitige Downloads bei eBay
+THUMB_SIZE = 500                        # Listen, Karten, Benachrichtigungen
+GALLERY_SIZE = 1600                     # Galerie: so groß, wie eBay die Bilder höchstens herausgibt
 
 _http: httpx.AsyncClient | None = None
 _locks: dict[str, asyncio.Lock] = {}
@@ -47,26 +52,44 @@ _last_cleanup = 0.0
 
 # ---------------------------------------------------------------- Adressen
 
-def url(search_id: int | None, item_id: str | None, image: str | None) -> str | None:
-    """Adresse eines Artikelbildes in Ebay Watcher, z. B. /bild/3/v1%7C1234%7C0?v=…&s=…"""
+def url(search_id: int | None, item_id: str | None, image: str | None, n: int = 0, big: bool = False) -> str | None:
+    """Adresse eines Artikelbildes in Ebay Watcher, z. B. /bild/3/v1%7C1234%7C0?v=…&s=…
+    n: Nummer des Bildes (0 = Hauptbild), big: groß für die Galerie."""
     if not image or search_id is None or not item_id:
         return None
     version = hashlib.sha256(image.encode()).hexdigest()[:8]
+    extra = (f"&n={n}" if n else "") + ("&g=1" if big else "")
     return (f"/bild/{search_id}/{quote(str(item_id), safe='')}"
-            f"?v={version}&s={signed.sign(search_id, item_id)}")
+            f"?v={version}&s={signed.sign(search_id, item_id)}{extra}")
 
 
 def valid(search_id: int, item_id: str, signature: str | None) -> bool:
     return signed.valid(signature, search_id, item_id)
 
 
-def source(search_id: int, item_id: str) -> str | None:
-    """eBay-Adresse des Bildes, aus dem gemerkten Angebot oder der Kopie bei „Ausgeblendet“."""
-    for table in ("items", "hidden_items"):
-        row = db.q1(f"SELECT image FROM {table} WHERE search_id = ? AND item_id = ?", (search_id, item_id))
-        if row and row["image"]:
-            return util.large_image(row["image"])
-    return None
+def originals(search_id: int, item_id: str) -> list[str]:
+    """eBay-Adressen aller Bilder eines Angebots, das Hauptbild zuerst. Aus dem gemerkten Angebot,
+    sonst aus der Kopie bei „Ausgeblendet“ (dort nur das Hauptbild)."""
+    row = db.q1("SELECT image, images FROM items WHERE search_id = ? AND item_id = ?", (search_id, item_id))
+    if row:
+        try:
+            found = [u for u in json.loads(row["images"] or "[]") if isinstance(u, str) and u]
+        except ValueError:
+            found = []
+        if found:
+            return found
+        if row["image"]:
+            return [row["image"]]
+    row = db.q1("SELECT image FROM hidden_items WHERE search_id = ? AND item_id = ?", (search_id, item_id))
+    return [row["image"]] if row and row["image"] else []
+
+
+def source(search_id: int, item_id: str, n: int = 0, big: bool = False) -> str | None:
+    """eBay-Adresse eines Bildes in der Größe, in der Ebay Watcher es lädt."""
+    found = originals(search_id, item_id)
+    if not 0 <= n < len(found):
+        return None
+    return util.large_image(found[n], GALLERY_SIZE if big else THUMB_SIZE)
 
 
 def allowed(address: str) -> bool:
@@ -96,6 +119,82 @@ def _image_type(head: bytes) -> str | None:
 def media_type(path: Path) -> str:
     with path.open("rb") as f:
         return _image_type(f.read(16)) or "application/octet-stream"
+
+
+def dimensions(path: Path) -> tuple[int, int] | None:
+    """Breite und Höhe eines Bildes aus dem Dateikopf (die Galerie braucht sie vorab)."""
+    try:
+        with path.open("rb") as f:
+            head = f.read(30)
+            kind = _image_type(head[:16])
+            if kind == "image/png":
+                return struct.unpack(">II", head[16:24])
+            if kind == "image/gif":
+                return struct.unpack("<HH", head[6:10])
+            if kind == "image/webp":
+                return _webp_size(head)
+            if kind == "image/jpeg":
+                return _jpeg_size(f)
+    except (OSError, struct.error, ValueError):
+        pass
+    return None
+
+
+def _webp_size(head: bytes) -> tuple[int, int] | None:
+    chunk = head[12:16]
+    if chunk == b"VP8 ":     # verlustbehaftet
+        w, h = struct.unpack("<HH", head[26:30])
+        return w & 0x3FFF, h & 0x3FFF
+    if chunk == b"VP8L":     # verlustfrei
+        bits = int.from_bytes(head[21:25], "little")
+        return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+    if chunk == b"VP8X":     # erweitert
+        return int.from_bytes(head[24:27], "little") + 1, int.from_bytes(head[27:30], "little") + 1
+    return None
+
+
+_SOF = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+
+
+def _jpeg_size(f) -> tuple[int, int] | None:
+    """JPEG-Abschnitte bis zum Frame-Kopf durchgehen. Dreht eine EXIF-Angabe das Bild um 90°,
+    zeigt der Browser es gedreht, dann sind Breite und Höhe vertauscht."""
+    f.seek(2)
+    swap = False
+    while True:
+        byte = f.read(1)
+        while byte and byte != b"\xff":
+            byte = f.read(1)
+        while byte == b"\xff":
+            byte = f.read(1)
+        if not byte:
+            return None
+        marker = byte[0]
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            continue                       # Abschnitte ohne Länge
+        length = struct.unpack(">H", f.read(2))[0]
+        if marker in _SOF:
+            h, w = struct.unpack(">HH", f.read(5)[1:5])
+            return (h, w) if swap else (w, h)
+        data = f.read(length - 2)
+        if marker == 0xE1 and data[:6] == b"Exif\0\0":
+            try:
+                swap = _exif_orientation(data[6:]) in (5, 6, 7, 8)
+            except struct.error:
+                pass   # kaputte EXIF-Angaben: Maße wie gespeichert
+
+
+def _exif_orientation(tiff: bytes) -> int | None:
+    order = {b"II": "<", b"MM": ">"}.get(tiff[:2])
+    if not order:
+        return None
+    offset = struct.unpack(order + "I", tiff[4:8])[0]
+    count = struct.unpack(order + "H", tiff[offset:offset + 2])[0]
+    for i in range(count):
+        entry = tiff[offset + 2 + i * 12: offset + 14 + i * 12]
+        if len(entry) == 12 and struct.unpack(order + "H", entry[:2])[0] == 0x0112:
+            return struct.unpack(order + "H", entry[8:10])[0]
+    return None
 
 
 def _client() -> httpx.AsyncClient:

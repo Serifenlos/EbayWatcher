@@ -13,7 +13,7 @@
 <link rel="stylesheet" href="{{ asset('css/app-min.css') }}">
 <script src="{{ asset('js/app-min.js') }}" defer></script>
 </head>
-<body>
+<body{% if signed_in %} data-photoswipe="{{ asset('js/photoswipe-min.js') }}"{% endif %}>
 {% if signed_in %}
 <header class="mx-auto flex max-w-280 items-center justify-between gap-4 px-gutter py-3.5 xs:py-4.5">
   <a class="inline-flex items-center gap-2.5 text-title font-semibold tracking-[-0.01em] text-ink no-underline" href="/" aria-label="Zur Übersicht">

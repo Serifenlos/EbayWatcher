@@ -1,6 +1,7 @@
 """Reine Hilfsfunktionen: Formatierung, Auswertung von eBay-Angeboten, Limit-Prüfung."""
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import datetime
@@ -205,16 +206,24 @@ def parse_listing(d: dict, pickup: bool = False) -> dict:
     except (TypeError, ValueError):
         distance = None
 
-    image = (d.get("image") or {}).get("imageUrl")
-    if not image:
-        thumbs = d.get("thumbnailImages") or d.get("additionalImages") or []
-        image = thumbs[0].get("imageUrl") if thumbs else None
+    # Hauptbild und weitere Bilder (für die Galerie), jedes nur einmal, egal in welcher Größe eBay es nennt
+    urls: list[str] = []
+    for img in [d.get("image"), *(d.get("additionalImages") or [])]:
+        url = img.get("imageUrl") if isinstance(img, dict) else None
+        if url and large_image(url) not in {large_image(u) for u in urls}:
+            urls.append(url)
+    if not urls:
+        thumbs = d.get("thumbnailImages") or []
+        if thumbs and thumbs[0].get("imageUrl"):
+            urls.append(thumbs[0]["imageUrl"])
+    image = urls[0] if urls else None
 
     return {
         "item_id": d.get("itemId"),
         "title": d.get("title") or "",
         "url": d.get("itemWebUrl") or d.get("itemAffiliateWebUrl") or "",
         "image": image,
+        "images": json.dumps(urls) if urls else None,
         "is_auction": int(is_auction),
         "has_bin": int(has_bin),
         "price": price,
@@ -315,7 +324,17 @@ def item_view(item: dict, search: dict, now: float) -> dict:
         "within": within_limit(item, search),
         "flags": item_flags(item),
         "ends_in": (item["end_time"] - now) if item.get("end_time") else None,
+        "image_count": image_count(item),
     }
+
+
+def image_count(item: dict) -> int:
+    """Wie viele Bilder die Galerie zeigen kann (Hauptbild mitgezählt)."""
+    try:
+        found = json.loads(item.get("images") or "[]")
+    except ValueError:
+        found = []
+    return len(found) if isinstance(found, list) and found else (1 if item.get("image") else 0)
 
 
 def ending_first(v: dict) -> tuple:
@@ -372,7 +391,7 @@ def hidden_view(row: dict, item: dict | None, search: dict, now: float) -> dict:
             "auction": False, "total": None, "rel_price": None, "ratio": 0.0, "within": False,
             "flags": [], "shipping_known": 0, "shipping": None, "gross": None,
             "pickup_only": 0, "near": 0, "bid_count": None, "location_text": "", "end_time": None,
-            "first_seen": row["hidden_at"], "distance_km": None,
+            "first_seen": row["hidden_at"], "distance_km": None, "image_count": 1 if row["image"] else 0,
         }
     view["hidden_at"] = row["hidden_at"]
     return view
