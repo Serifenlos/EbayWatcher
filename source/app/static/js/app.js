@@ -411,7 +411,8 @@
   }
 
   function addPanel(pswp, html) {
-    var s = { panel: null, body: null, peek: null, top: 0, peekHeight: 0, frame: 0, anim: 0, drag: null };
+    var s = { panel: null, body: null, peek: null, info: null, top: 0, peekHeight: 0, frame: 0, anim: 0, drag: null,
+              zoomHidden: false, zoomLevel: null };
     pswp.options.paddingFn = function () { return galleryPadding(pswp, s); };
 
     // Bild an die Schublade anpassen, höchstens einmal je Bildschirmaufbau
@@ -443,21 +444,64 @@
       s.anim = window.requestAnimationFrame(step);
     }
 
-    // Größe neu bestimmen (Öffnen, Drehen, Fenstergröße): am Rechner Leiste rechts, am Handy Schublade
+    // Größe neu bestimmen (Öffnen, Drehen, Fenstergröße, Ein- und Ausblenden): am Rechner Leiste rechts, am
+    // Handy Schublade. Die Schublade bleibt, wo sie war; nur beim ersten Mal schaut nur der Kopf heraus.
     function relayout() {
       if (!s.panel) return;
       if (wideGallery.matches) {
         s.panel.style.height = "";
-      } else {
-        var b = sheetBounds(pswp, s);
-        var wasOpen = s.peekHeight && s.top <= b.minTop + 1;
+      } else if (!s.panel.hidden) {
+        var first = !s.peekHeight;
         s.peekHeight = s.peek.getBoundingClientRect().bottom - s.panel.getBoundingClientRect().top + s.body.scrollTop + 20;
-        b = sheetBounds(pswp, s);
-        s.top = wasOpen ? b.minTop : b.peekTop;
+        var b = sheetBounds(pswp, s);
+        s.top = first ? b.peekTop : Math.min(b.peekTop, Math.max(b.minTop, s.top));
         s.panel.style.height = (b.height - s.top) + "px";
       }
       pswp.updateSize(true);
     }
+
+    function showPanel(show) {
+      s.panel.hidden = !show;
+      s.info.setAttribute("aria-pressed", String(show));
+      pswp.element.dataset.panel = show ? "open" : "closed";
+      relayout();
+    }
+
+    // Lupe (Knopf oder Taste Z): Zum Vergrößern verschwindet die Leiste, das Bild bekommt den ganzen Bildschirm.
+    // Beim Verkleinern kommt sie so zurück, wie sie war. Ebenso, wenn man anders zurückzoomt (Doppeltippen,
+    // Finger, Mausrad) oder zum nächsten Bild blättert.
+    var toggleZoom = pswp.toggleZoom;
+    pswp.toggleZoom = function () {
+      var slide = pswp.currSlide;
+      if (slide && s.panel) {
+        var zoomedIn = slide.currZoomLevel !== slide.zoomLevels.initial;
+        if (!zoomedIn && !s.panel.hidden) {
+          s.zoomHidden = true;
+          showPanel(false);
+        } else if (zoomedIn && s.zoomHidden) {
+          s.zoomHidden = false;
+          showPanel(true);
+        }
+      }
+      toggleZoom.call(pswp);
+    };
+
+    function restoreAfterZoom() {
+      if (!s.zoomHidden) return;
+      s.zoomHidden = false;
+      window.requestAnimationFrame(function () { showPanel(true); });   // nicht mitten in PhotoSwipes Animation
+    }
+
+    pswp.on("zoomPanUpdate", function (event) {
+      var level = event.slide.currZoomLevel;
+      var initial = event.slide.zoomLevels.initial;
+      if (s.zoomLevel !== null && s.zoomLevel > initial + 0.001 && level <= initial + 0.001) restoreAfterZoom();
+      s.zoomLevel = level;
+    });
+    pswp.on("change", function () {
+      s.zoomLevel = null;
+      restoreAfterZoom();
+    });
 
     // Wischen auf der Schublade: erst die Schublade schieben, ist sie oben, den Text scrollen (das macht der
     // Browser). Zurück nach unten geht es, sobald der Text wieder am Anfang steht.
@@ -520,12 +564,13 @@
         title: "Angaben ein- oder ausblenden",
         ariaLabel: "Angaben zum Angebot ein- oder ausblenden",
         html: { isCustomSVG: true, inner: INFO_ICON, outlineID: "pswp__icn-info" },
-        onInit: function (el) { el.setAttribute("aria-pressed", "true"); },
-        onClick: function (event, el) {
-          s.panel.hidden = !s.panel.hidden;
-          el.setAttribute("aria-pressed", String(!s.panel.hidden));
-          pswp.element.dataset.panel = s.panel.hidden ? "closed" : "open";
-          relayout();
+        onInit: function (el) {
+          s.info = el;
+          el.setAttribute("aria-pressed", "true");
+        },
+        onClick: function () {
+          s.zoomHidden = false;   // von Hand ein- oder ausgeblendet: so bleibt es
+          showPanel(s.panel.hidden);
         }
       });
       pswp.ui.registerElement({
