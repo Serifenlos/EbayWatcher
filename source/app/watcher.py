@@ -16,7 +16,7 @@ import logging
 import time
 from urllib.parse import quote
 
-from . import db, images, market, notify, signed, util
+from . import db, details, images, market, notify, signed, util
 from .ebay import EbayClient, EbayError
 
 log = logging.getLogger("ebay-watcher")
@@ -33,7 +33,7 @@ SPLIT_FOR = 6 * 3600           # „Beides“ mit mehr als 200 Treffern: so lang
 ITEM_FIELDS = [
     "title", "url", "image", "images", "is_auction", "has_bin", "price", "bin_price", "currency",
     "shipping", "shipping_known", "bid_count", "end_time", "country", "location_text",
-    "pickup", "pickup_only", "distance_km", "near", "epid", "cond",
+    "pickup", "pickup_only", "distance_km", "near", "epid", "cond", "condition_text",
 ]
 FORMATS = {"auction": ["AUCTION"], "fixed": ["FIXED_PRICE"], "both": ["AUCTION", "FIXED_PRICE"]}
 
@@ -253,6 +253,8 @@ class Watcher:
                 detail = await self.ebay.get_item(item_id, plz)
             except EbayError:
                 break
+            if detail:
+                details.store(item_id, detail)   # Beschreibung für die Galerie gleich mitnehmen
             end = util.parse_listing(detail)["end_time"] if detail else None
             if end:
                 db.ex("UPDATE items SET end_time = ? WHERE search_id = ? AND item_id = ?", (end, s["id"], item_id))
@@ -317,13 +319,19 @@ class Watcher:
                 (1 if view["within"] else 0, *key),
             )
 
+    async def refresh(self, row: dict, settings: dict) -> dict | None:
+        """Galerie: aktueller Stand eines Angebots samt Beschreibung und Geboten (details.py)."""
+        return await self._fresh_item(row, (settings.get("plz") or "").strip(), "galerie")
+
     async def _fresh_item(self, row: dict, plz: str, purpose: str) -> dict | None:
-        """Aktueller Stand eines gemerkten Angebots über getItem (eine Abfrage). None: bei eBay nicht mehr da."""
+        """Aktueller Stand eines gemerkten Angebots über getItem (eine Abfrage). None: bei eBay nicht mehr da.
+        Beschreibung, Merkmale und Gebote landen nebenbei in details.py."""
         detail = await self.ebay.get_item(row["item_id"], plz, purpose=purpose)
         if detail is None:
             db.ex("UPDATE items SET status = 'gone' WHERE search_id = ? AND item_id = ?",
                   (row["search_id"], row["item_id"]))
             return None
+        details.store(row["item_id"], detail)
         fresh = util.parse_listing(detail, bool(row["pickup"]))
         # Was getItem nicht (zuverlässig) liefert, aus der Suche übernehmen
         for field in ("pickup", "pickup_only", "distance_km", "near"):
@@ -332,7 +340,7 @@ class Watcher:
             fresh["shipping"], fresh["shipping_known"] = 0.0, 1
         elif not fresh["shipping_known"] and row["shipping_known"]:
             fresh["shipping"], fresh["shipping_known"] = row["shipping"], 1
-        for field in ("end_time", "image", "images", "url", "title", "epid", "cond"):
+        for field in ("end_time", "image", "images", "url", "title", "epid", "cond", "condition_text"):
             if not fresh[field]:
                 fresh[field] = row[field]
         self._update_item(row["search_id"], row["item_id"], fresh, time.time(), reset_end=False)
@@ -390,10 +398,11 @@ class Watcher:
         if not v["within"]:
             return {   # still: Preis inzwischen über dem Limit
                 "title": f"Nicht mehr unter Limit: {name}",
-                "message": "\n".join([util.short(v["title"], 120), price, util.limit_text(s)]),
+                "message": "\n".join([util.short(v["title"], 120), *self._condition_line(v), price, util.limit_text(s)]),
                 "click": v["url"], "priority": 2, "tags": ["chart_with_upwards_trend"],
             }
-        lines = [util.short(v["title"], 120), price, *self._market_line(s, v, settings), util.limit_text(s), *v["flags"]]
+        lines = [util.short(v["title"], 120), *self._condition_line(v), price, *self._market_line(s, v, settings),
+                 util.limit_text(s), *v["flags"]]
         return {
             "title": f"Letzte Minute: {name}",
             "message": "\n".join(lines),
@@ -557,6 +566,12 @@ class Watcher:
         return f"{label} {price}"
 
     @staticmethod
+    def _condition_line(v: dict) -> list[str]:
+        """z. B. „Zustand: Gebraucht“ (eBay-Wortlaut, ohne Zusatz in Klammern)."""
+        label = util.condition_label(v)
+        return [f"Zustand: {label}"] if label else []
+
+    @staticmethod
     def _market_line(s: dict, v: dict, settings: dict) -> list[str]:
         if not market.enabled(settings):
             return []
@@ -568,6 +583,7 @@ class Watcher:
         bids = v["bid_count"] or 0
         lines = [
             util.short(v["title"], 120),
+            *self._condition_line(v),
             f"{self._price_line(v, 'Aktuell', settings)}, {bids} {'Gebot' if bids == 1 else 'Gebote'}",
             *self._market_line(s, v, settings),
             util.limit_text(s),
@@ -584,8 +600,8 @@ class Watcher:
         }
 
     def _fixed_push(self, s: dict, v: dict, settings: dict) -> dict:
-        lines = [util.short(v["title"], 120), self._price_line(v, "Preis", settings), *self._market_line(s, v, settings),
-                 util.limit_text(s), *v["flags"]]
+        lines = [util.short(v["title"], 120), *self._condition_line(v), self._price_line(v, "Preis", settings),
+                 *self._market_line(s, v, settings), util.limit_text(s), *v["flags"]]
         return {
             "title": f"Sofortkauf unter Limit: {util.short(s['name'] or s['query'], 40)}",
             "message": "\n".join(lines),

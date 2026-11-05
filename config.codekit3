@@ -155,6 +155,14 @@
       "oAP" : "\/build\/app\/db.py",
       "oF" : 1
     },
+    "\/source\/app\/details.py" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 2,
+      "oAP" : "\/build\/app\/details.py",
+      "oF" : 1
+    },
     "\/source\/app\/ebay.py" : {
       "cB" : 0,
       "ft" : 8192,
@@ -260,6 +268,14 @@
       "hM" : 0,
       "oA" : 0,
       "oAP" : "\/build\/app\/templates\/dashboard.html",
+      "oF" : 0
+    },
+    "\/source\/app\/templates\/includes\/gallery_panel.html" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 0,
+      "oAP" : "\/build\/app\/templates\/includes\/gallery_panel.html",
       "oF" : 0
     },
     "\/source\/app\/templates\/includes\/offer_list.html" : {
@@ -385,7 +401,7 @@
     "displayValueWasSetByUser" : 0,
     "iconImageName" : "brackets-pale",
     "iconImageWasSetByUser" : 0,
-    "lastBuiltDate" : 815559634.22930002
+    "lastBuiltDate" : 815580004.15469396
   },
   "projectSettings" : {
     "abortBuildOnError" : 1,

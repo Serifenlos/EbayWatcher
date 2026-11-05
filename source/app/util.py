@@ -224,6 +224,7 @@ def parse_listing(d: dict, pickup: bool = False) -> dict:
         "url": d.get("itemWebUrl") or d.get("itemAffiliateWebUrl") or "",
         "image": image,
         "images": json.dumps(urls) if urls else None,
+        "condition_text": (d.get("condition") or "").strip()[:120] or None,
         "is_auction": int(is_auction),
         "has_bin": int(has_bin),
         "price": price,
@@ -325,7 +326,22 @@ def item_view(item: dict, search: dict, now: float) -> dict:
         "flags": item_flags(item),
         "ends_in": (item["end_time"] - now) if item.get("end_time") else None,
         "image_count": image_count(item),
+        "condition": condition_label(item),
+        "condition_full": condition_label(item, full=True),
+        "defect": item.get("cond") == "parts",
     }
+
+
+CONDITION_FALLBACK = {"new": "Neu", "used": "Gebraucht", "parts": "Als Ersatzteil/defekt"}
+
+
+def condition_label(item: dict, full: bool = False) -> str | None:
+    """Zustand im Wortlaut von eBay. Kurz ohne Zusatz in Klammern:
+    „Neu: Sonstige (siehe Artikelbeschreibung)“ → „Neu: Sonstige“."""
+    text = (item.get("condition_text") or "").strip() or CONDITION_FALLBACK.get(item.get("cond") or "")
+    if not text or full:
+        return text or None
+    return re.sub(r"\s*\([^)]*\)\s*$", "", text) or text
 
 
 def image_count(item: dict) -> int:
@@ -392,6 +408,7 @@ def hidden_view(row: dict, item: dict | None, search: dict, now: float) -> dict:
             "flags": [], "shipping_known": 0, "shipping": None, "gross": None,
             "pickup_only": 0, "near": 0, "bid_count": None, "location_text": "", "end_time": None,
             "first_seen": row["hidden_at"], "distance_km": None, "image_count": 1 if row["image"] else 0,
+            "condition": None, "condition_full": None, "defect": False,
         }
     view["hidden_at"] = row["hidden_at"]
     return view

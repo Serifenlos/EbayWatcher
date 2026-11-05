@@ -11,6 +11,7 @@
  *   3. Dunkelmodus: dieselben Tokens mit dunklen Werten
  *   4. Eigene Varianten für die Ansicht „Karten“ und „Liste“
  *   5. Grundstile für HTML-Elemente
+ *   6. Bilder-Galerie: was sich an PhotoSwipe nicht mit Klassen im Template lösen lässt
  *
  * Alles Weitere steht als Tailwind-Klassen direkt in den Templates.
  * Wiederkehrende Bausteine (Buttons, Eingabefelder, Schalter …) liegen in templates/includes/ui.html.
@@ -179,5 +180,18 @@
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
     border-radius: 4px;
+  }
+}
+
+
+/* ------------------------------------------------------------------ 6. Bilder-Galerie */
+
+/*
+ * Ist am Rechner die Seitenleiste offen (app.js setzt data-panel an PhotoSwipe), rückt der Pfeil
+ * „Nächstes Bild“ links neben die Leiste (Breite w-95 = 23.75rem, siehe includes/gallery_panel.html).
+ */
+@media (min-width: 64rem) {
+  .pswp[data-panel="open"] .pswp__button--arrow--next {
+    right: 23.75rem;
   }
 }

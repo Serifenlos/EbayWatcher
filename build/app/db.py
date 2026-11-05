@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS items (
     url             TEXT,
     image           TEXT,
     images          TEXT,                  -- alle Bildadressen bei eBay als JSON-Liste (für die Galerie)
+    condition_text  TEXT,                  -- Zustand im Wortlaut von eBay, z. B. „Gebraucht“
     is_auction      INTEGER NOT NULL DEFAULT 0,
     has_bin         INTEGER NOT NULL DEFAULT 0,
     price           REAL,
@@ -135,6 +136,20 @@ CREATE TABLE IF NOT EXISTS market_items (
     PRIMARY KEY (key, item_id)
 );
 
+-- Angaben, die nur getItem liefert (für die Seitenleiste der Galerie, siehe details.py).
+-- Je eBay-Angebot einmal, auch wenn es in mehreren Gesuchen steht.
+CREATE TABLE IF NOT EXISTS item_details (
+    item_id         TEXT PRIMARY KEY,
+    description     TEXT,      -- Beschreibung des Verkäufers als bereinigter Text (JSON-Liste von Absätzen)
+    truncated       INTEGER NOT NULL DEFAULT 0,
+    condition_note  TEXT,      -- Zustandsbeschreibung des Verkäufers
+    aspects         TEXT,      -- Artikelmerkmale als JSON-Liste [[Name, Wert], …]
+    bidders         INTEGER,   -- verschiedene Bieter
+    min_bid         REAL,      -- nächstes Gebot ab
+    reserve_met     INTEGER,   -- Mindestpreis erreicht (nur bei Auktionen mit Mindestpreis)
+    fetched_at      REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS api_usage (
     day    TEXT PRIMARY KEY,
     calls  INTEGER NOT NULL DEFAULT 0
@@ -189,7 +204,7 @@ def _migrate() -> None:
     if "interval_minutes" not in {r["name"] for r in q("PRAGMA table_info(searches)")}:
         ex("ALTER TABLE searches ADD COLUMN interval_minutes INTEGER")
     columns = {r["name"] for r in q("PRAGMA table_info(items)")}
-    for name in ("epid", "cond", "images"):
+    for name in ("epid", "cond", "images", "condition_text"):
         if name not in columns:
             ex(f"ALTER TABLE items ADD COLUMN {name} TEXT")
     for name in ("remind", "reminded"):
@@ -316,3 +331,5 @@ def prune() -> None:
     )
     ex("DELETE FROM api_usage WHERE day < date('now', '-60 day')")
     ex("DELETE FROM api_calls WHERE day < date('now', '-60 day')")
+    ex("DELETE FROM item_details WHERE item_id NOT IN (SELECT item_id FROM items) "
+       "AND item_id NOT IN (SELECT item_id FROM hidden_items)")

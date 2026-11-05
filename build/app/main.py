@@ -16,8 +16,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, config, db, images, market, notify, signed, util
-from .ebay import PURPOSES
+from . import auth, config, db, details, images, market, notify, signed, util
+from .ebay import PURPOSES, EbayError
 from .watcher import Watcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -246,8 +246,16 @@ async def article_image(request: Request, sid: int, item_id: str):
 
 @app.get("/galerie/{sid}/{item_id}")
 async def gallery(sid: int, item_id: str):
-    """Bilder eines Angebots für die Galerie (PhotoSwipe, siehe app.js), mit Breite und Höhe.
-    Beim ersten Öffnen lädt Ebay Watcher alle Bilder groß bei eBay und legt sie in den Bild-Cache."""
+    """Bilder eines Angebots für die Galerie (PhotoSwipe, siehe app.js), mit Breite und Höhe, dazu die
+    Seitenleiste (panel) als fertiges HTML. Beim ersten Öffnen lädt Ebay Watcher alle Bilder groß bei eBay
+    und legt sie in den Bild-Cache. Beschreibung und Gebote holt es mit einer Einzelabfrage, höchstens alle
+    10 Minuten (details.py)."""
+    row = db.q1("SELECT * FROM items WHERE search_id = ? AND item_id = ?", (sid, item_id))
+    if row and row["status"] == "active" and watcher.ebay.configured and details.due(item_id):
+        try:
+            await watcher.refresh(row, db.get_settings())
+        except EbayError as e:
+            log.info("Galerie %s: %s", item_id, e)   # dann eben mit dem letzten bekannten Stand
     found = images.originals(sid, item_id)
     if not found:
         return JSONResponse({"items": []}, 404)
@@ -258,7 +266,32 @@ async def gallery(sid: int, item_id: str):
         size = images.dimensions(path) if path else None
         if size:   # Bilder, die eBay gerade nicht liefert, fehlen in der Galerie
             items.append({"src": images.url(sid, item_id, original, n, big=True), "width": size[0], "height": size[1]})
-    return JSONResponse({"items": items}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"items": items, "panel": _gallery_panel(sid, item_id)}, headers={"Cache-Control": "no-store"})
+
+
+def _gallery_panel(sid: int, item_id: str) -> str:
+    """Seitenleiste der Galerie: Preis, Zustand, Ø, Gebote, Merkmale und Beschreibung (includes/gallery_panel.html)."""
+    s = db.q1("SELECT * FROM searches WHERE id = ?", (sid,))
+    if not s:
+        return ""
+    now = time.time()
+    settings = db.get_settings()
+    overview = util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (sid,)), now, db.hidden_ids(sid))
+    v = None
+    for group in ("matches", "over"):   # Ø wie in der Liste: im Vergleich mit den übrigen Angeboten
+        if any(o["item_id"] == item_id for o in overview[group]):
+            market.attach(s, settings, overview[group])
+            v = next(o for o in overview[group] if o["item_id"] == item_id)
+    if v is None:
+        v = next((h for h in _hidden_views(s, now) if h["item_id"] == item_id), None)
+    row = db.q1("SELECT * FROM items WHERE search_id = ? AND item_id = ?", (sid, item_id))
+    if v is None and row:   # beendet oder bei eBay verschwunden
+        v = {**util.item_view(row, s, now), "kind": "Beendet", "end_time": None, "market": None}
+    if v is None:
+        return ""
+    return templates.get_template("includes/gallery_panel.html").render(
+        v=v, d=details.load(item_id), now=now, gone=not row or row["status"] != "active",
+        prices_with_shipping=util.with_shipping(settings))
 
 
 # ---------------------------------------------------------------- Anmeldung

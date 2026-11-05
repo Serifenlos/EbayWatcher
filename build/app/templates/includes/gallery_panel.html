@@ -1,0 +1,96 @@
+{#
+  Seitenleiste der Bilder-Galerie. main.py schickt sie fertig gerendert mit /galerie/…, app.js setzt sie in
+  PhotoSwipe ein. Am Rechner (ab lg) rechts neben dem Bild, am Handy unten als Schublade: eingeklappt nur
+  Preis, Zustand und Gebote, „Beschreibung lesen“ klappt sie hoch (data-expanded).
+  Erwartet: v (Angebot wie in der Liste), d (details.load, kann fehlen), now, gone, prices_with_shipping
+#}
+{% import "includes/ui.html" as ui %}
+{% set shown = v.gross if prices_with_shipping else v.rel_price %}
+<aside class="group/panel absolute z-10 flex flex-col overflow-y-auto overscroll-contain bg-surface text-ink
+              max-lg:inset-x-0 max-lg:bottom-0 max-lg:max-h-[40vh] max-lg:rounded-t-tile max-lg:shadow-[0_-8px_30px_rgba(0,0,0,0.35)]
+              max-lg:data-[expanded=true]:h-[70vh] max-lg:data-[expanded=true]:max-h-none
+              lg:top-15 lg:right-0 lg:bottom-0 lg:w-95 lg:border-l lg:border-line"
+       data-gallery-panel data-expanded="false" aria-label="Angaben zum Angebot">
+  <div class="grid gap-3 px-5 pt-4 pb-6 lg:gap-4 lg:pt-5">
+    {# max-lg:group-data-[expanded=false]/panel:… gilt nur in der eingeklappten Schublade am Handy #}
+    {% set collapsed_hidden = "max-lg:group-data-[expanded=false]/panel:hidden" %}
+    <div class="grid gap-2">
+      <h2 class="text-title leading-snug max-lg:group-data-[expanded=false]/panel:line-clamp-1">{{ v.title }}</h2>
+      {% if shown is not none %}
+      <div class="grid gap-0.5">
+        <p class="{{ ui.num() }} text-figure font-semibold">{{ eur(shown) }}</p>
+        {% if v.near and v.shipping_known and v.shipping and not v.pickup_only %}
+        <p class="text-meta text-muted {{ collapsed_hidden }}">bei Abholung, sonst + {{ eur(v.shipping) }} Versand</p>
+        {% elif v.shipping_known and v.shipping and not v.pickup_only %}
+        <p class="text-meta text-muted {{ collapsed_hidden }}">{% if prices_with_shipping %}{{ eur(v.rel_price) }} + {{ eur(v.shipping) }} Versand{% else %}zzgl. {{ eur(v.shipping) }} Versand{% endif %}</p>
+        {% elif v.shipping_known and not v.shipping and not v.pickup_only %}
+        <p class="text-meta text-muted {{ collapsed_hidden }}">Versand kostenlos</p>
+        {% endif %}
+      </div>
+      {% endif %}
+      <div class="grid text-meta text-muted">
+        <p>
+          {{- v.kind }}
+          {%- if v.auction %}, {{ v.bid_count or 0 }} {{ 'Gebot' if v.bid_count == 1 else 'Gebote' }}
+            {%- if d and d.bidders and v.bid_count %} von {{ d.bidders }} {{ 'Bieter' if d.bidders == 1 else 'Bietern' }}{% endif %}
+          {%- endif -%}
+        </p>
+        {% if v.auction and v.end_time %}<p>Endet in {{ ui.countdown_span(v.end_time, now) }}</p>{% endif %}
+        {% if v.auction and d and d.min_bid and not gone %}<p class="{{ collapsed_hidden }}">Nächstes Gebot ab {{ eur(d.min_bid) }}</p>{% endif %}
+        {% if v.auction and d and d.reserve_met == 0 %}<p class="font-medium text-tight">Mindestpreis noch nicht erreicht</p>{% endif %}
+        {% if gone %}<p class="font-medium text-over">Dieses Angebot ist bei eBay nicht mehr verfügbar.</p>{% endif %}
+      </div>
+    </div>
+
+    {% if v.condition or v.market or v.flags %}
+    <div class="flex flex-wrap items-center gap-1.5">
+      {% if v.condition %}<span data-defect="{{ 'true' if v.defect else 'false' }}" title="{{ v.condition_full }}" class="rounded-full bg-accent-soft px-2.25 text-[12.5px] leading-5.5 font-semibold text-accent data-[defect=true]:bg-over-soft data-[defect=true]:text-over">{{ v.condition }}</span>{% endif %}
+      {% if v.market %}{% set m = v.market %}
+      <span data-tone="{{ m.tone }}" title="{{ m.hint }}" class="{{ ui.num() }} rounded-full bg-tile px-2.25 text-[12.5px] leading-5.5 font-semibold text-ink-2 data-[tone=good]:bg-accent-soft data-[tone=good]:text-accent data-[tone=high]:bg-over-soft data-[tone=high]:text-tight">Ø {{ eur(m.median) }} ({{ m.delta_text }})</span>
+      {% endif %}
+      {% for flag in v.flags %}<span class="text-meta font-medium text-tight">{{ flag }}</span>{% endfor %}
+    </div>
+    {% endif %}
+
+    <button class="flex cursor-pointer items-center justify-between text-ui font-semibold text-accent lg:hidden" type="button" data-panel-expand aria-expanded="false">
+      <span class="group-data-[expanded=true]/panel:hidden">Beschreibung lesen</span>
+      <span class="hidden group-data-[expanded=true]/panel:inline">Weniger zeigen</span>
+      <span aria-hidden="true" class="transition-transform group-data-[expanded=true]/panel:rotate-180">▴</span>
+    </button>
+
+    {# Ab hier am Handy erst nach „Beschreibung lesen“ #}
+    <div class="grid gap-4 {{ collapsed_hidden }}">
+      {% if d and d.condition_note %}
+      <p class="text-note text-ink-2">„{{ d.condition_note }}“</p>
+      {% endif %}
+
+      {% if d and d.aspects %}
+      <section class="grid gap-1.5">
+        <h3 class="text-[11.5px] font-semibold tracking-[0.06em] text-muted uppercase">Artikelmerkmale</h3>
+        <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3.5 gap-y-0.75 text-meta">
+          {% for name, value in d.aspects %}<dt class="text-muted">{{ name }}</dt><dd class="text-ink-2 [overflow-wrap:anywhere]">{{ value }}</dd>{% endfor %}
+        </dl>
+      </section>
+      {% endif %}
+
+      <section class="grid gap-2">
+        <h3 class="text-[11.5px] font-semibold tracking-[0.06em] text-muted uppercase">Beschreibung</h3>
+        {% if d and d.description %}
+        <div class="grid gap-2 text-[14px] leading-normal text-ink-2 [overflow-wrap:anywhere]">
+          {% for b in d.description %}
+          {% if b.t == 'h' %}<p class="font-semibold text-ink">{{ b.text }}</p>
+          {% elif b.t == 'li' %}<p data-li class="relative pl-4 before:absolute before:left-1 before:content-['•'] [[data-li]+&]:-mt-1.5">{{ b.text }}</p>
+          {% else %}<p>{{ b.text }}</p>{% endif %}
+          {% endfor %}
+        </div>
+        {% if d.truncated %}<p class="text-meta text-muted">Gekürzt, die ganze Beschreibung steht bei eBay.</p>{% endif %}
+        {% elif d %}
+        <p class="text-meta text-muted">Der Verkäufer hat keine Beschreibung als Text hinterlegt, vielleicht nur Bilder.</p>
+        {% else %}
+        <p class="text-meta text-muted">Die Beschreibung ist gerade nicht verfügbar.</p>
+        {% endif %}
+        {% if v.url %}<p class="text-ui"><a href="{{ v.url }}" target="_blank" rel="noopener noreferrer">{{ 'Ganze Beschreibung bei eBay' if d and d.description else 'Angebot bei eBay öffnen' }} ↗</a></p>{% endif %}
+      </section>
+    </div>
+  </div>
+</aside>

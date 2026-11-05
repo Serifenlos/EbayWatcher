@@ -20,7 +20,8 @@ PAGE_SIZE = 200
 
 # Wofür eine Abfrage war (Einstellungen → eBay-Verbindung zeigt die Abfragen danach aufgeschlüsselt)
 PURPOSES = {"suche": "Suche nach neuen Angeboten", "endspurt": "Endspurt vor Auktionsende",
-            "erinnerung": "Erinnerung 1 Min vor Ende", "durchschnitt": "Durchschnittspreis"}
+            "erinnerung": "Erinnerung 1 Min vor Ende", "durchschnitt": "Durchschnittspreis",
+            "galerie": "Galerie (Beschreibung und Gebote)"}
 
 
 class EbayError(Exception):

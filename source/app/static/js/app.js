@@ -343,6 +343,8 @@
   // /galerie/… liefert Adressen und Maße der Bilder aus dem Bild-Cache. PhotoSwipe selbst (js/photoswipe.js,
   // gebündelt aus node_modules) lädt erst beim ersten Klick, die Adresse steht in <body data-photoswipe>.
   // Ohne JavaScript führt das Bild zu eBay.
+  // Seitenleiste (includes/gallery_panel.html, kommt fertig mit /galerie/…): beim Öffnen eingeblendet,
+  // der Knopf ⓘ blendet sie aus und ein. Ab 64rem Breite steht sie rechts, darunter unten als Schublade.
 
   var GALLERY_OPTIONS = {
     bgOpacity: 0.92,
@@ -358,6 +360,9 @@
   };
   // Knopf „Bei eBay öffnen“ oben in der Galerie (Pfeil aus dem Kasten, 32er-Raster wie die PhotoSwipe-Symbole)
   var EBAY_ICON = '<path id="pswp__icn-ebay" d="M9 11h6v2h-4v8h8v-4h2v6H9zM17 9h6v6h-2v-2.6l-5.3 5.3-1.4-1.4 5.3-5.3H17z"/>';
+  var INFO_ICON = '<path id="pswp__icn-info" fill-rule="evenodd" d="M16 6.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19zm0 2a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15zM15 14h2v7h-2zm0-3.5h2v2h-2z"/>';
+  var PANEL_WIDTH = 380;                                   // w-95 in gallery_panel.html
+  var wideGallery = window.matchMedia("(min-width: 64rem)");   // lg: Leiste rechts statt unten
   var photoSwipe = null;
 
   function loadPhotoSwipe() {
@@ -387,6 +392,64 @@
       });
   }
 
+  // Platz fürs Bild: neben bzw. über der Seitenleiste, damit sie nichts verdeckt
+  function galleryPadding(panel) {
+    if (!panel || panel.hidden) return { top: 0, bottom: 0, left: 0, right: 0 };
+    if (wideGallery.matches) return { top: 60, bottom: 16, left: 16, right: PANEL_WIDTH + 16 };
+    return { top: 56, bottom: panel.offsetHeight + 8, left: 0, right: 0 };
+  }
+
+  function addPanel(pswp, html) {
+    var state = { panel: null };
+    pswp.options.paddingFn = function () { return galleryPadding(state.panel); };
+    pswp.on("uiRegister", function () {
+      pswp.ui.registerElement({
+        name: "info",
+        order: 8,
+        isButton: true,
+        title: "Angaben ein- oder ausblenden",
+        ariaLabel: "Angaben zum Angebot ein- oder ausblenden",
+        html: { isCustomSVG: true, inner: INFO_ICON, outlineID: "pswp__icn-info" },
+        onInit: function (el) { el.setAttribute("aria-pressed", "true"); },
+        onClick: function (event, el) {
+          state.panel.hidden = !state.panel.hidden;
+          el.setAttribute("aria-pressed", String(!state.panel.hidden));
+          pswp.element.dataset.panel = state.panel.hidden ? "closed" : "open";
+          pswp.updateSize(true);
+        }
+      });
+      pswp.ui.registerElement({
+        name: "panel",
+        appendTo: "root",
+        onInit: function (el) {
+          el.innerHTML = html;
+          state.panel = el.querySelector("[data-gallery-panel]");
+          pswp.element.dataset.panel = "open";
+          // Das Mausrad scrollt in der Leiste den Text, statt das Bild zu zoomen
+          el.addEventListener("wheel", function (event) { event.stopPropagation(); }, { passive: true });
+          var expand = el.querySelector("[data-panel-expand]");
+          if (expand) {
+            expand.addEventListener("click", function () {
+              var open = state.panel.dataset.expanded !== "true";
+              state.panel.dataset.expanded = String(open);
+              expand.setAttribute("aria-expanded", String(open));
+              if (!open) state.panel.scrollTop = 0;
+              pswp.updateSize(true);
+            });
+          }
+          tick();
+        }
+      });
+    });
+    // Erst wenn die Leiste im Bild ist, kennt das Handy ihre Höhe
+    pswp.on("afterInit", function () {
+      window.requestAnimationFrame(function () { pswp.updateSize(true); });
+    });
+    function relayout() { pswp.updateSize(true); }
+    wideGallery.addEventListener("change", relayout);
+    pswp.on("destroy", function () { wideGallery.removeEventListener("change", relayout); });
+  }
+
   function openGallery(link) {
     var thumb = link.querySelector("img");
     link.setAttribute("aria-busy", "true");
@@ -394,9 +457,14 @@
       .then(function (results) {
         var PhotoSwipe = results[0];
         var items = results[1].items || [];
-        if (!items.length) throw new Error("keine Bilder");
-        if (thumb) items[0].msrc = thumb.currentSrc || thumb.src;   // Vorschaubild, bis das große Bild da ist
+        if (!items.length && !results[1].panel) throw new Error("keine Bilder");
+        if (!items.length) {   // keine Bilder, aber Beschreibung: Galerie trotzdem öffnen
+          items = [{ html: '<p class="grid h-full place-items-center px-6 text-center text-ui text-white/70">Zu diesem Angebot liefert eBay gerade keine Bilder.</p>' }];
+        } else if (thumb) {
+          items[0].msrc = thumb.currentSrc || thumb.src;   // Vorschaubild, bis das große Bild da ist
+        }
         var pswp = new PhotoSwipe(Object.assign({ dataSource: items }, GALLERY_OPTIONS));
+        if (results[1].panel) addPanel(pswp, results[1].panel);
         pswp.on("uiRegister", function () {
           pswp.ui.registerElement({
             name: "ebay",
