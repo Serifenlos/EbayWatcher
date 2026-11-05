@@ -678,10 +678,11 @@ async def settings_page(request: Request):
 @app.post("/settings/general")
 async def save_general(request: Request):
     form = await checked_form(request)
-    values = {k: str(form.get(k, "")).strip() for k in ("plz", "radius_km", "lead_minutes", "interval_minutes", "app_url")}
+    values = {k: str(form.get(k, "")).strip() for k in ("radius_km", "lead_minutes", "interval_minutes", "app_url")}
+    values["plz"] = str(form.get("mittelpunkt", "")).strip()   # Feldname ohne „plz“, siehe settings.html
     errors = {}
     if values["plz"] and not re.fullmatch(r"\d{5}", values["plz"]):
-        errors["plz"] = "Eine deutsche Postleitzahl hat fünf Ziffern."
+        errors["plz"] = "Bitte fünf Ziffern eingeben, zum Beispiel 10115."
     for key, lo, hi in (("radius_km", 1, 500), ("lead_minutes", 1, 180), ("interval_minutes", 5, 240)):
         if not values[key].isdigit() or not lo <= int(values[key]) <= hi:
             errors[key] = f"Wähle eine Zahl von {lo} bis {hi}."

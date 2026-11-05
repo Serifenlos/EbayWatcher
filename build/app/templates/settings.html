@@ -22,8 +22,14 @@
     {{ ui.csrf_field(csrf) }}
     <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-5">
       <div class="grid min-w-0 gap-2">
-        <label class="{{ ui.label() }}" for="plz">Postleitzahl</label>
-        <input class="{{ ui.input() }}" id="plz" name="plz" value="{{ s.plz }}" inputmode="numeric" maxlength="5" placeholder="10115" autocomplete="postal-code" {% if errors.plz %}aria-invalid="true"{% endif %}>
+        {#
+          Absichtlich ohne die Wörter „PLZ“ und „Postleitzahl“ in Feldname, Beschriftung und Platzhalter und ohne
+          autocomplete="postal-code": Daran erkennen Passwortmanager wie Bitwarden ein Adressfeld und bieten an,
+          es mit gespeicherten Identitäten zu füllen. data-bwignore: Bitwarden lässt das Feld dann ganz in Ruhe,
+          sofern das in Bitwarden eingeschaltet ist. Der Wert heißt intern weiter plz.
+        #}
+        <label class="{{ ui.label() }}" for="mittelpunkt">Standort</label>
+        <input class="{{ ui.input() }}" id="mittelpunkt" name="mittelpunkt" value="{{ s.plz }}" inputmode="numeric" maxlength="5" placeholder="10115" autocomplete="off" data-bwignore {% if errors.plz %}aria-invalid="true"{% endif %}>
         {{ ui.error(errors, 'plz') }}
       </div>
       <div class="grid min-w-0 gap-2">

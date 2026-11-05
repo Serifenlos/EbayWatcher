@@ -347,7 +347,7 @@
   // der Knopf ⓘ blendet sie aus und ein. Ab 64rem Breite steht sie rechts, darunter unten als Schublade.
 
   var GALLERY_OPTIONS = {
-    bgOpacity: 0.92,
+    bgOpacity: 1,
     showHideAnimationType: "fade",
     wheelToZoom: true,
     preload: [1, 2],
@@ -392,16 +392,41 @@
       });
   }
 
-  // Platz fürs Bild: neben bzw. über der Seitenleiste, damit sie nichts verdeckt
-  function galleryPadding(panel) {
-    if (!panel || panel.hidden) return { top: 0, bottom: 0, left: 0, right: 0 };
+  // Platz fürs Bild: neben der Seitenleiste bzw. über der Schublade, damit sie nichts verdeckt
+  function galleryPadding(pswp, s) {
+    if (!s.panel || s.panel.hidden) return { top: 0, bottom: 0, left: 0, right: 0 };
     if (wideGallery.matches) return { top: 60, bottom: 16, left: 16, right: PANEL_WIDTH + 16 };
-    return { top: 56, bottom: panel.offsetHeight + 8, left: 0, right: 0 };
+    // Handy: das Bild endet dort, wo die Schublade gerade beginnt (höchstens bis zur Mindesthöhe oben)
+    var root = pswp.element.getBoundingClientRect();
+    var sheetTop = Math.max(s.sheet.getBoundingClientRect().top, s.panel.getBoundingClientRect().top);
+    return { top: 56, bottom: Math.max(0, root.bottom - sheetTop) + 8, left: 0, right: 0 };
+  }
+
+  // Handy: Abstand über der Schublade so hoch, dass anfangs nur ihr Kopf herausschaut
+  function measureSheet(s) {
+    if (!s.panel || wideGallery.matches) return;
+    var peek = s.peek.getBoundingClientRect().bottom - s.sheet.getBoundingClientRect().top + 20;
+    var height = s.panel.clientHeight;
+    s.spacer.style.height = Math.max(0, height - Math.min(peek, height * 0.6)) + "px";
   }
 
   function addPanel(pswp, html) {
-    var state = { panel: null };
-    pswp.options.paddingFn = function () { return galleryPadding(state.panel); };
+    var s = { panel: null, sheet: null, spacer: null, peek: null, frame: 0 };
+    pswp.options.paddingFn = function () { return galleryPadding(pswp, s); };
+
+    function relayout() {
+      measureSheet(s);
+      pswp.updateSize(true);
+    }
+    // Beim Hochschieben das Bild fortlaufend mitverkleinern (höchstens einmal je Bildschirmaufbau)
+    function followSheet() {
+      if (s.frame || wideGallery.matches) return;
+      s.frame = window.requestAnimationFrame(function () {
+        s.frame = 0;
+        pswp.updateSize(true);
+      });
+    }
+
     pswp.on("uiRegister", function () {
       pswp.ui.registerElement({
         name: "info",
@@ -412,10 +437,10 @@
         html: { isCustomSVG: true, inner: INFO_ICON, outlineID: "pswp__icn-info" },
         onInit: function (el) { el.setAttribute("aria-pressed", "true"); },
         onClick: function (event, el) {
-          state.panel.hidden = !state.panel.hidden;
-          el.setAttribute("aria-pressed", String(!state.panel.hidden));
-          pswp.element.dataset.panel = state.panel.hidden ? "closed" : "open";
-          pswp.updateSize(true);
+          s.panel.hidden = !s.panel.hidden;
+          el.setAttribute("aria-pressed", String(!s.panel.hidden));
+          pswp.element.dataset.panel = s.panel.hidden ? "closed" : "open";
+          relayout();
         }
       });
       pswp.ui.registerElement({
@@ -423,31 +448,34 @@
         appendTo: "root",
         onInit: function (el) {
           el.innerHTML = html;
-          state.panel = el.querySelector("[data-gallery-panel]");
+          s.panel = el.querySelector("[data-gallery-panel]");
+          s.sheet = el.querySelector("[data-sheet]");
+          s.spacer = el.querySelector("[data-sheet-spacer]");
+          s.peek = el.querySelector("[data-sheet-peek]");
           pswp.element.dataset.panel = "open";
+          if (el.isConnected) measureSheet(s);
           // Das Mausrad scrollt in der Leiste den Text, statt das Bild zu zoomen
           el.addEventListener("wheel", function (event) { event.stopPropagation(); }, { passive: true });
-          var expand = el.querySelector("[data-panel-expand]");
-          if (expand) {
-            expand.addEventListener("click", function () {
-              var open = state.panel.dataset.expanded !== "true";
-              state.panel.dataset.expanded = String(open);
-              expand.setAttribute("aria-expanded", String(open));
-              if (!open) state.panel.scrollTop = 0;
-              pswp.updateSize(true);
-            });
-          }
+          s.panel.addEventListener("scroll", followSheet, { passive: true });
+          // Griff: ganz hochschieben bzw. zurück zur großen Galerie
+          el.querySelector("[data-sheet-handle]").addEventListener("click", function () {
+            var open = s.spacer.offsetHeight;
+            s.panel.scrollTo({ top: s.panel.scrollTop < open / 2 ? open : 0, behavior: "smooth" });
+          });
           tick();
         }
       });
     });
-    // Erst wenn die Leiste im Bild ist, kennt das Handy ihre Höhe
-    pswp.on("afterInit", function () {
-      window.requestAnimationFrame(function () { pswp.updateSize(true); });
-    });
-    function relayout() { pswp.updateSize(true); }
+    // Den Kopf der Schublade messen, sobald sie im Bild ist, und nach dem Einblenden noch einmal
+    // (während der Öffnen-Animation passt PhotoSwipe die Bildgröße nicht an)
+    pswp.on("afterInit", function () { window.requestAnimationFrame(relayout); });
+    pswp.on("openingAnimationEnd", relayout);
     wideGallery.addEventListener("change", relayout);
-    pswp.on("destroy", function () { wideGallery.removeEventListener("change", relayout); });
+    window.addEventListener("resize", relayout);
+    pswp.on("destroy", function () {
+      wideGallery.removeEventListener("change", relayout);
+      window.removeEventListener("resize", relayout);
+    });
   }
 
   function openGallery(link) {
