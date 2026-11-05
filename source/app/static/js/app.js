@@ -350,6 +350,7 @@
     bgOpacity: 1,
     showHideAnimationType: "fade",
     wheelToZoom: true,
+    tapAction: false,          // Tippen aufs Bild am Handy: nichts tun (Doppeltippen zoomt weiter)
     preload: [1, 2],
     closeTitle: "Schließen (Esc)",
     zoomTitle: "Vergrößern (Z)",
@@ -392,39 +393,123 @@
       });
   }
 
+  // Am Handy ist die Seitenleiste eine Schublade am unteren Rand (includes/gallery_panel.html). s.top ist ihre
+  // Oberkante: zwischen peekTop (nur der Kopf schaut heraus) und minTop (Galerie auf Mindesthöhe).
+  var SHEET_MIN = 0.3;   // Galerie am Handy mindestens 30 % der Bildschirmhöhe
+
+  function sheetBounds(pswp, s) {
+    var height = pswp.element.clientHeight;
+    var minTop = Math.round(height * SHEET_MIN);
+    return { height: height, minTop: minTop, peekTop: Math.max(minTop, height - Math.min(s.peekHeight, height * 0.6)) };
+  }
+
   // Platz fürs Bild: neben der Seitenleiste bzw. über der Schublade, damit sie nichts verdeckt
   function galleryPadding(pswp, s) {
     if (!s.panel || s.panel.hidden) return { top: 0, bottom: 0, left: 0, right: 0 };
     if (wideGallery.matches) return { top: 60, bottom: 16, left: 16, right: PANEL_WIDTH + 16 };
-    // Handy: das Bild endet dort, wo die Schublade gerade beginnt (höchstens bis zur Mindesthöhe oben)
-    var root = pswp.element.getBoundingClientRect();
-    var sheetTop = Math.max(s.sheet.getBoundingClientRect().top, s.panel.getBoundingClientRect().top);
-    return { top: 56, bottom: Math.max(0, root.bottom - sheetTop) + 8, left: 0, right: 0 };
-  }
-
-  // Handy: Abstand über der Schublade so hoch, dass anfangs nur ihr Kopf herausschaut
-  function measureSheet(s) {
-    if (!s.panel || wideGallery.matches) return;
-    var peek = s.peek.getBoundingClientRect().bottom - s.sheet.getBoundingClientRect().top + 20;
-    var height = s.panel.clientHeight;
-    s.spacer.style.height = Math.max(0, height - Math.min(peek, height * 0.6)) + "px";
+    return { top: 56, bottom: pswp.element.clientHeight - s.top + 8, left: 0, right: 0 };
   }
 
   function addPanel(pswp, html) {
-    var s = { panel: null, sheet: null, spacer: null, peek: null, frame: 0 };
+    var s = { panel: null, body: null, peek: null, top: 0, peekHeight: 0, frame: 0, anim: 0, drag: null };
     pswp.options.paddingFn = function () { return galleryPadding(pswp, s); };
 
-    function relayout() {
-      measureSheet(s);
-      pswp.updateSize(true);
-    }
-    // Beim Hochschieben das Bild fortlaufend mitverkleinern (höchstens einmal je Bildschirmaufbau)
+    // Bild an die Schublade anpassen, höchstens einmal je Bildschirmaufbau
     function followSheet() {
-      if (s.frame || wideGallery.matches) return;
+      if (s.frame) return;
       s.frame = window.requestAnimationFrame(function () {
         s.frame = 0;
         pswp.updateSize(true);
       });
+    }
+
+    function setTop(top) {
+      var b = sheetBounds(pswp, s);
+      s.top = Math.min(b.peekTop, Math.max(b.minTop, top));
+      s.panel.style.height = (b.height - s.top) + "px";
+      followSheet();
+    }
+
+    function animateTo(target) {
+      window.cancelAnimationFrame(s.anim);
+      var from = s.top;
+      var start = null;
+      function step(time) {
+        if (start === null) start = time;
+        var p = Math.min(1, (time - start) / 260);
+        setTop(from + (target - from) * (1 - Math.pow(1 - p, 3)));
+        if (p < 1) s.anim = window.requestAnimationFrame(step);
+      }
+      s.anim = window.requestAnimationFrame(step);
+    }
+
+    // Größe neu bestimmen (Öffnen, Drehen, Fenstergröße): am Rechner Leiste rechts, am Handy Schublade
+    function relayout() {
+      if (!s.panel) return;
+      if (wideGallery.matches) {
+        s.panel.style.height = "";
+      } else {
+        var b = sheetBounds(pswp, s);
+        var wasOpen = s.peekHeight && s.top <= b.minTop + 1;
+        s.peekHeight = s.peek.getBoundingClientRect().bottom - s.panel.getBoundingClientRect().top + s.body.scrollTop + 20;
+        b = sheetBounds(pswp, s);
+        s.top = wasOpen ? b.minTop : b.peekTop;
+        s.panel.style.height = (b.height - s.top) + "px";
+      }
+      pswp.updateSize(true);
+    }
+
+    // Wischen auf der Schublade: erst die Schublade schieben, ist sie oben, den Text scrollen (das macht der
+    // Browser). Zurück nach unten geht es, sobald der Text wieder am Anfang steht.
+    function onTouchStart(event) {
+      if (wideGallery.matches || event.touches.length !== 1) { s.drag = null; return; }
+      window.cancelAnimationFrame(s.anim);
+      var y = event.touches[0].clientY;
+      s.drag = { y0: y, top0: s.top, scroll0: s.body.scrollTop, mode: "", samples: [{ y: y, t: event.timeStamp }] };
+    }
+
+    function onTouchMove(event) {
+      var d = s.drag;
+      if (!d) return;
+      var y = event.touches[0].clientY;
+      var b = sheetBounds(pswp, s);
+      if (!d.mode) {
+        // gleich bei der ersten Bewegung entscheiden, sonst fängt Safari schon an, den Text zu scrollen
+        if (y === d.y0) return;
+        var open = s.top <= b.minTop + 1;
+        d.mode = !open || (y > d.y0 && s.body.scrollTop <= 0) ? "sheet" : "text";
+      }
+      if (d.mode !== "sheet") return;
+      event.preventDefault();
+      var want = d.top0 + (y - d.y0);
+      if (want < b.minTop) s.body.scrollTop = d.scroll0 + (b.minTop - want);   // oben angekommen: Text weiter
+      setTop(want);
+      d.samples.push({ y: y, t: event.timeStamp });
+      if (d.samples.length > 5) d.samples.shift();
+    }
+
+    function onTouchEnd() {
+      var d = s.drag;
+      s.drag = null;
+      if (!d || d.mode !== "sheet" || d.samples.length < 2) return;
+      // Schwung: kräftig nach oben oder unten gewischt, dann ganz auf bzw. zu
+      var first = d.samples[0];
+      var last = d.samples[d.samples.length - 1];
+      var speed = (last.y - first.y) / Math.max(1, last.t - first.t);
+      var b = sheetBounds(pswp, s);
+      if (speed < -0.4 && s.top > b.minTop) animateTo(b.minTop);
+      else if (speed > 0.4 && s.top < b.peekTop) animateTo(b.peekTop);
+    }
+
+    // Mausrad (schmales Fenster am Rechner): wie Wischen. Nie an PhotoSwipe weitergeben, sonst zoomt das Bild.
+    function onWheel(event) {
+      event.stopPropagation();
+      if (wideGallery.matches) return;
+      var b = sheetBounds(pswp, s);
+      if ((event.deltaY > 0 && s.top > b.minTop) || (event.deltaY < 0 && s.body.scrollTop <= 0 && s.top < b.peekTop)) {
+        event.preventDefault();
+        setTop(s.top - event.deltaY);
+      }
     }
 
     pswp.on("uiRegister", function () {
@@ -449,30 +534,31 @@
         onInit: function (el) {
           el.innerHTML = html;
           s.panel = el.querySelector("[data-gallery-panel]");
-          s.sheet = el.querySelector("[data-sheet]");
-          s.spacer = el.querySelector("[data-sheet-spacer]");
+          s.body = el.querySelector("[data-sheet-body]");
           s.peek = el.querySelector("[data-sheet-peek]");
           pswp.element.dataset.panel = "open";
-          if (el.isConnected) measureSheet(s);
-          // Das Mausrad scrollt in der Leiste den Text, statt das Bild zu zoomen
-          el.addEventListener("wheel", function (event) { event.stopPropagation(); }, { passive: true });
-          s.panel.addEventListener("scroll", followSheet, { passive: true });
+          s.panel.addEventListener("touchstart", onTouchStart, { passive: true });
+          s.panel.addEventListener("touchmove", onTouchMove, { passive: false });
+          s.panel.addEventListener("touchend", onTouchEnd);
+          s.panel.addEventListener("touchcancel", onTouchEnd);
+          s.panel.addEventListener("wheel", onWheel, { passive: false });
           // Griff: ganz hochschieben bzw. zurück zur großen Galerie
           el.querySelector("[data-sheet-handle]").addEventListener("click", function () {
-            var open = s.spacer.offsetHeight;
-            s.panel.scrollTo({ top: s.panel.scrollTop < open / 2 ? open : 0, behavior: "smooth" });
+            var b = sheetBounds(pswp, s);
+            animateTo(s.top > (b.minTop + b.peekTop) / 2 ? b.minTop : b.peekTop);
           });
+          if (el.isConnected) relayout();
           tick();
         }
       });
     });
-    // Den Kopf der Schublade messen, sobald sie im Bild ist, und nach dem Einblenden noch einmal
-    // (während der Öffnen-Animation passt PhotoSwipe die Bildgröße nicht an)
+    // Nach dem Einblenden noch einmal messen: während der Öffnen-Animation passt PhotoSwipe die Bildgröße nicht an
     pswp.on("afterInit", function () { window.requestAnimationFrame(relayout); });
     pswp.on("openingAnimationEnd", relayout);
     wideGallery.addEventListener("change", relayout);
     window.addEventListener("resize", relayout);
     pswp.on("destroy", function () {
+      window.cancelAnimationFrame(s.anim);
       wideGallery.removeEventListener("change", relayout);
       window.removeEventListener("resize", relayout);
     });

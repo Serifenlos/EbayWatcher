@@ -1,26 +1,24 @@
 {#
   Seitenleiste der Bilder-Galerie. main.py schickt sie fertig gerendert mit /galerie/…, app.js setzt sie in
   PhotoSwipe ein. Am Rechner (ab lg) rechts neben dem Bild, eigener Bildlauf.
-  Am Handy eine Schublade, die man hochschiebt: <aside> ist ein durchsichtiger Bildlauf-Bereich vom unteren
-  Rand der Galerie-Mindesthöhe (top-[30dvh]) bis unten. Darin zuerst ein leerer Abstand (data-sheet-spacer,
-  Höhe setzt app.js), dann die Schublade (data-sheet). Anfangs schaut nur der Kopf (data-sheet-peek) heraus.
-  Schiebt man hoch, wandert die Schublade nach oben und app.js verkleinert das Bild darüber; ist sie oben,
-  läuft der Text weiter. Zurückschieben macht die Galerie wieder groß. Durch den Abstand hindurch (pointer-
-  events-none) bedient man weiter PhotoSwipe. Der Griff oben schiebt die Schublade ganz auf oder zu.
+  Am Handy eine Schublade am unteren Rand. Ihre Höhe setzt app.js: anfangs schaut nur der Kopf heraus
+  (data-sheet-peek), mit dem Finger schiebt man sie hoch, bis die Galerie darüber ihre Mindesthöhe hat; dann
+  läuft der Text (data-sheet-body) weiter. Herunterschieben macht die Galerie wieder groß. Der Griff oben
+  (data-sheet-handle) schiebt die Schublade ganz auf oder zu. Das Schieben steuert app.js selbst: Ein
+  durchsichtiger Bildlauf über der Galerie (pointer-events: none) ließ sich in Safari auf dem iPhone nicht schieben.
   Erwartet: v (Angebot wie in der Liste), d (details.load, kann fehlen), now, gone, prices_with_shipping
 #}
 {% import "includes/ui.html" as ui %}
 {% set shown = v.gross if prices_with_shipping else v.rel_price %}
-<aside class="absolute z-10 overflow-y-auto overscroll-contain
-              max-lg:pointer-events-none max-lg:inset-x-0 max-lg:top-[30dvh] max-lg:bottom-0
-              lg:top-15 lg:right-0 lg:bottom-0 lg:w-95 lg:border-l lg:border-line lg:bg-surface"
+<aside class="absolute z-10 flex flex-col overflow-hidden bg-surface text-ink
+              max-lg:inset-x-0 max-lg:bottom-0 max-lg:h-[40dvh] max-lg:rounded-t-tile max-lg:shadow-[0_-8px_30px_rgba(0,0,0,0.35)]
+              lg:top-15 lg:right-0 lg:bottom-0 lg:w-95 lg:border-l lg:border-line"
        data-gallery-panel aria-label="Angaben zum Angebot">
-  <div class="lg:hidden" data-sheet-spacer aria-hidden="true"></div>
-  <div class="pointer-events-auto bg-surface text-ink max-lg:min-h-full max-lg:rounded-t-tile max-lg:shadow-[0_-8px_30px_rgba(0,0,0,0.35)]" data-sheet>
-  <button class="flex w-full cursor-pointer justify-center pt-2.5 pb-1 lg:hidden" type="button" data-sheet-handle aria-label="Angaben ganz hochschieben oder zurück">
+  <button class="flex w-full flex-none cursor-pointer justify-center pt-2.5 pb-1.5 lg:hidden" type="button" data-sheet-handle aria-label="Angaben ganz hochschieben oder zurück">
     <span class="h-1 w-10 rounded-full bg-control"></span>
   </button>
-  <div class="grid gap-3 px-5 pt-2 pb-8 lg:gap-4 lg:pt-5">
+  <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-sheet-body>
+  <div class="grid gap-3 px-5 pt-1 pb-8 lg:gap-4 lg:pt-5">
     <div class="grid gap-3 lg:gap-4" data-sheet-peek>
     <div class="grid gap-2">
       <h2 class="text-title leading-snug">{{ v.title }}</h2>
@@ -96,5 +94,5 @@
       </section>
     </div>
   </div>
-  </div>{# Ende data-sheet #}
+  </div>{# Ende data-sheet-body #}
 </aside>
