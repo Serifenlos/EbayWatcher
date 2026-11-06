@@ -400,8 +400,9 @@
   // Bilder-Galerie: Klick aufs Vorschaubild oder den Titel zeigt alle Bilder des Angebots (PhotoSwipe,
   // photoswipe.com). /galerie/… liefert Adressen und Maße der Bilder aus dem Bild-Cache. PhotoSwipe selbst
   // (js/photoswipe.js, gebündelt aus node_modules) lädt erst beim ersten Klick, die Adresse steht in
-  // <body data-photoswipe>. Ohne JavaScript oder mit Befehls-/Strg-Taste führen Bild und Titel zu eBay.
-  // In der Leiste oben: Ausblenden (wie das Auge in der Liste), Angaben ein/aus, bei eBay öffnen.
+  // <body data-photoswipe>. Ohne JavaScript oder mit Befehls-/Strg-Taste führen Bild und Titel zur Plattform
+  // (eBay …, Name in data-platform). In der Leiste oben: Ausblenden (wie das Auge in der Liste), Angaben
+  // ein/aus, bei der Plattform öffnen.
   // Seitenleiste (includes/gallery_panel.html, kommt fertig mit /galerie/…): beim Öffnen eingeblendet,
   // der Knopf ⓘ blendet sie aus und ein. Ab 64rem Breite steht sie rechts, darunter unten als Schublade.
 
@@ -418,7 +419,7 @@
     errorMsg: "Dieses Bild lässt sich gerade nicht laden.",
     indexIndicatorSep: " / "
   };
-  // Knopf „Bei eBay öffnen“ oben in der Galerie (Pfeil aus dem Kasten, 32er-Raster wie die PhotoSwipe-Symbole)
+  // Knopf „Bei eBay öffnen“ (bzw. der Plattform) oben in der Galerie (Pfeil aus dem Kasten, 32er-Raster wie die PhotoSwipe-Symbole)
   var EBAY_ICON = '<path id="pswp__icn-ebay" d="M9 11h6v2h-4v8h8v-4h2v6H9zM17 9h6v6h-2v-2.6l-5.3 5.3-1.4-1.4 5.3-5.3H17z"/>';
   var HIDE_ICON = '<g id="pswp__icn-hide"><path fill-rule="evenodd" d="M5.5 16c2.4-4.2 6-6.3 10.5-6.3s8.1 2.1 10.5 6.3c-2.4 4.2-6 6.3-10.5 6.3S7.9 20.2 5.5 16zm2.4 0c2 3 4.7 4.4 8.1 4.4s6.1-1.4 8.1-4.4c-2-3-4.7-4.4-8.1-4.4S9.9 13 7.9 16z"/><circle cx="16" cy="16" r="2.6"/><path d="M8.2 6.8l17 17-1.4 1.4-17-17z"/></g>';
   var INFO_ICON = '<path id="pswp__icn-info" fill-rule="evenodd" d="M16 6.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19zm0 2a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15zM15 14h2v7h-2zm0-3.5h2v2h-2z"/>';
@@ -669,6 +670,10 @@
     });
   }
 
+  function platformName(link) {
+    return link.getAttribute("data-platform") || "eBay";
+  }
+
   // Vorschaubild und Titel einer Zeile öffnen dieselbe Galerie (includes/offer.html)
   function openGallery(link) {
     var row = link.closest("li[data-offer]");
@@ -682,7 +687,7 @@
         var items = results[1].items || [];
         if (!items.length && !results[1].panel) throw new Error("keine Bilder");
         if (!items.length) {   // keine Bilder, aber Beschreibung: Galerie trotzdem öffnen
-          items = [{ html: '<p class="grid h-full place-items-center px-6 text-center text-ui text-white/70">Zu diesem Angebot liefert eBay gerade keine Bilder.</p>' }];
+          items = [{ html: '<p class="grid h-full place-items-center px-6 text-center text-ui text-white/70">Zu diesem Angebot liefert ' + platformName(link) + ' gerade keine Bilder.</p>' }];
         } else if (thumb) {
           items[0].msrc = thumb.currentSrc || thumb.src;   // Vorschaubild, bis das große Bild da ist
         }
@@ -709,8 +714,8 @@
             order: 9,
             isButton: true,
             tagName: "a",
-            title: "Bei eBay öffnen",
-            ariaLabel: "Bei eBay öffnen",
+            title: "Bei " + platformName(link) + " öffnen",
+            ariaLabel: "Bei " + platformName(link) + " öffnen",
             html: { isCustomSVG: true, inner: EBAY_ICON, outlineID: "pswp__icn-ebay" },
             onInit: function (el) {
               el.href = link.href;
@@ -722,7 +727,7 @@
         pswp.init();
       })
       .catch(function (error) {
-        // Ohne Galerie wenigstens das Angebot bei eBay zeigen, wie ohne JavaScript
+        // Ohne Galerie wenigstens das Angebot bei der Plattform zeigen, wie ohne JavaScript
         console.info("Heuhaufen: Galerie nicht verfügbar (" + error.message + ")");
         var tab = window.open(link.href, "_blank");
         if (tab) tab.opener = null;
@@ -734,7 +739,7 @@
   document.addEventListener("click", function (event) {
     var link = event.target.closest ? event.target.closest("a[data-gallery]") : null;
     if (!link || !document.body.dataset.photoswipe) return;
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;   // neuer Tab: eBay
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;   // neuer Tab: Plattform
     event.preventDefault();
     if (link.getAttribute("aria-busy") !== "true") openGallery(link);
   });

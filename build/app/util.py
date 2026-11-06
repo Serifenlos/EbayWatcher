@@ -1,4 +1,4 @@
-"""Reine Hilfsfunktionen: Formatierung, Auswertung von eBay-Angeboten, Limit-Prüfung."""
+"""Reine Hilfsfunktionen: Formatierung, Anzeige von Angeboten, Limit-Prüfung."""
 from __future__ import annotations
 
 import json
@@ -8,6 +8,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from . import config
+from .plattformen import liste as plattformen
 
 EU = {
     "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU",
@@ -81,12 +82,6 @@ def ago(ts: float | None, now: float | None = None) -> str:
     return f"vor {sec // 86400} {'Tag' if sec // 86400 == 1 else 'Tagen'}"
 
 
-def large_image(url: str | None, size: int = 500) -> str | None:
-    if not url:
-        return None
-    return re.sub(r"s-l\d+", f"s-l{size}", url)
-
-
 def parse_price(text: str | None) -> float | None:
     """'1.234,50', '300', '300.5' -> float"""
     if text is None:
@@ -135,114 +130,6 @@ def limit_text(s: dict) -> str:
 
 def exclusion_words(text: str) -> list[str]:
     return [w.lower() for w in re.split(r"[,;\s]+", text or "") if w.strip()]
-
-
-# ---------------------------------------------------------------- eBay-Angebote auswerten
-
-def _money(obj: dict | None) -> tuple[float | None, str | None]:
-    if not obj or obj.get("value") in (None, ""):
-        return None, None
-    try:
-        return float(obj["value"]), obj.get("currency")
-    except (TypeError, ValueError):
-        return None, None
-
-
-def _iso_ts(text: str | None) -> float | None:
-    if not text:
-        return None
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
-
-
-def condition_class(condition_id: object) -> str | None:
-    """eBay-Zustandsnummer → new | used | parts. Generalüberholt zählt als gebraucht."""
-    try:
-        cid = int(condition_id)
-    except (TypeError, ValueError):
-        return None
-    if cid in (1000, 1500, 1750):
-        return "new"
-    return "parts" if cid == 7000 else "used"
-
-
-def parse_listing(d: dict, pickup: bool = False) -> dict:
-    """Wandelt eine eBay item_summary- oder getItem-Antwort in unser Format um.
-    Verkäuferdaten werden absichtlich nicht übernommen."""
-    buying = d.get("buyingOptions") or []
-    is_auction = "AUCTION" in buying
-    has_bin = "FIXED_PRICE" in buying
-
-    price, currency = _money(d.get("price"))
-    bin_price = price if has_bin else None
-    if is_auction:
-        bid, bid_cur = _money(d.get("currentBidPrice"))
-        if bid is not None:
-            price, currency = bid, bid_cur or currency
-
-    ship_opts = d.get("shippingOptions") or []
-    costs = []
-    for opt in ship_opts:
-        value, _cur = _money(opt.get("shippingCost"))
-        if value is not None:
-            costs.append(value)
-    shipping, shipping_known = (min(costs), 1) if costs else (None, 0)
-    pickup_only = 1 if pickup and not ship_opts else 0
-    if pickup_only:
-        shipping, shipping_known = 0.0, 1
-
-    loc = d.get("itemLocation") or {}
-    loc_text = " ".join(x for x in [loc.get("postalCode"), loc.get("city")] if x)
-
-    distance = None
-    dist = d.get("distanceFromPickupLocation") or {}
-    try:
-        if dist.get("value") is not None:
-            distance = float(dist["value"])
-            if (dist.get("unit") or "").upper().startswith("MI"):
-                distance *= 1.609
-    except (TypeError, ValueError):
-        distance = None
-
-    # Hauptbild und weitere Bilder (für die Galerie), jedes nur einmal, egal in welcher Größe eBay es nennt
-    urls: list[str] = []
-    for img in [d.get("image"), *(d.get("additionalImages") or [])]:
-        url = img.get("imageUrl") if isinstance(img, dict) else None
-        if url and large_image(url) not in {large_image(u) for u in urls}:
-            urls.append(url)
-    if not urls:
-        thumbs = d.get("thumbnailImages") or []
-        if thumbs and thumbs[0].get("imageUrl"):
-            urls.append(thumbs[0]["imageUrl"])
-    image = urls[0] if urls else None
-
-    return {
-        "item_id": d.get("itemId"),
-        "title": d.get("title") or "",
-        "url": d.get("itemWebUrl") or d.get("itemAffiliateWebUrl") or "",
-        "image": image,
-        "images": json.dumps(urls) if urls else None,
-        "condition_text": (d.get("condition") or "").strip()[:120] or None,
-        "is_auction": int(is_auction),
-        "has_bin": int(has_bin),
-        "price": price,
-        "bin_price": bin_price,
-        "currency": currency or "EUR",
-        "shipping": shipping,
-        "shipping_known": shipping_known,
-        "bid_count": d.get("bidCount"),
-        "end_time": _iso_ts(d.get("itemEndDate")),
-        "country": loc.get("country"),
-        "location_text": loc_text,
-        "pickup": int(pickup),
-        "pickup_only": pickup_only,
-        "distance_km": distance,
-        "near": 0,   # setzt der Watcher, er kennt den Umkreis
-        "epid": d.get("epid") or None,
-        "cond": condition_class(d.get("conditionId")),
-    }
 
 
 # ---------------------------------------------------------------- Limit-Prüfung
@@ -326,6 +213,7 @@ def item_view(item: dict, search: dict, now: float) -> dict:
         "flags": item_flags(item),
         "ends_in": (item["end_time"] - now) if item.get("end_time") else None,
         "image_count": image_count(item),
+        "platform_name": plattformen.get(item.get("platform")).name,
         "condition": condition_label(item),
         "condition_full": condition_label(item, full=True),
         "defect": item.get("cond") == "parts",
@@ -336,7 +224,7 @@ CONDITION_FALLBACK = {"new": "Neu", "used": "Gebraucht", "parts": "Als Ersatztei
 
 
 def condition_label(item: dict, full: bool = False) -> str | None:
-    """Zustand im Wortlaut von eBay. Kurz ohne Zusatz in Klammern:
+    """Zustand im Wortlaut der Plattform. Kurz ohne Zusatz in Klammern:
     „Neu: Sonstige (siehe Artikelbeschreibung)“ → „Neu: Sonstige“."""
     text = (item.get("condition_text") or "").strip() or CONDITION_FALLBACK.get(item.get("cond") or "")
     if not text or full:
@@ -409,6 +297,7 @@ def hidden_view(row: dict, item: dict | None, search: dict, now: float) -> dict:
             "pickup_only": 0, "near": 0, "bid_count": None, "location_text": "", "end_time": None,
             "first_seen": row["hidden_at"], "distance_km": None, "image_count": 1 if row["image"] else 0,
             "condition": None, "condition_full": None, "defect": False,
+            "platform": row.get("platform"), "platform_name": plattformen.get(row.get("platform")).name,
         }
     view["hidden_at"] = row["hidden_at"]
     return view

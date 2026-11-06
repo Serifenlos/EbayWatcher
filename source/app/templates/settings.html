@@ -231,45 +231,70 @@
   </div>
 </section>
 
-<section class="{{ panel }}" id="ebay">
+{#
+  Je Plattform (plattformen/liste.py) ein Bereich: Zugangsdaten, Abfragen heute, Verbindung prüfen.
+  Geheime Felder (z. B. die Cert ID) bleiben leer; wer etwas einträgt, ersetzt den gespeicherten Wert.
+  autocomplete="off" und data-bwignore: Passwort-Manager sollen hier nichts eintragen.
+#}
+{% for pf in platforms %}
+<section class="{{ panel }}" id="{{ pf.key }}">
   <div>
-    <h2>eBay-Verbindung</h2>
-    <p class="{{ panel_text }}">Die Zugangsdaten stehen als Umgebungsvariablen im Portainer-Stack, nicht hier.</p>
+    <h2>{{ pf.name }}-Verbindung</h2>
+    {% if pf.key == 'ebay' %}
+    <p class="{{ panel_text }}">App ID und Cert ID findest du im <a href="https://developer.ebay.com/my/keys" target="_blank" rel="noopener noreferrer">eBay Developer Program</a> unter Application Keys, Keyset „Production“. Die Cert ID speichert Heuhaufen verschlüsselt.</p>
+    {% endif %}
   </div>
   <div class="{{ stack }}">
+    <form class="{{ stack }}" method="post" action="/settings/plattform/{{ pf.key }}" novalidate>
+      {{ ui.csrf_field(csrf) }}
+      {% for c in pf.credentials %}
+      <div class="grid min-w-0 gap-2">
+        <label class="{{ ui.label() }}" for="{{ c.key }}">{{ c.label }}</label>
+        {% if c.secret %}
+        <input class="{{ ui.input() }}" id="{{ c.key }}" name="{{ c.key }}" type="password" value="" autocomplete="off" data-bwignore spellcheck="false"
+               placeholder="{{ 'Gespeichert (' ~ pf.hints[c.key] ~ '), zum Ändern neu eingeben' if pf.hints[c.key] else '' }}">
+        {% else %}
+        <input class="{{ ui.input() }}" id="{{ c.key }}" name="{{ c.key }}" value="{{ s[c.key] or '' }}" autocomplete="off" data-bwignore spellcheck="false">
+        {% endif %}
+        {% if c.hint %}<p class="{{ ui.hint() }}">{{ c.hint }}</p>{% endif %}
+      </div>
+      {% endfor %}
+      <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button('primary') }}" type="submit">Speichern</button></div>
+    </form>
     {% set fact = "flex justify-between gap-4 border-b border-line pb-2.5" %}
     <dl class="grid gap-2.5">
-      <div class="{{ fact }}"><dt class="text-muted">Zugangsdaten</dt><dd class="text-right">{{ 'Hinterlegt' if ebay_configured else 'Fehlen' }}</dd></div>
-      <div class="{{ fact }}"><dt class="text-muted">Abfragen heute</dt><dd class="{{ ui.num() }} text-right">{{ api_calls }}</dd></div>
-      {% if api_purposes %}
+      <div class="{{ fact }}"><dt class="text-muted">Zugangsdaten</dt><dd class="text-right">{{ 'Hinterlegt' if pf.configured else 'Fehlen' }}</dd></div>
+      <div class="{{ fact }}"><dt class="text-muted">Abfragen heute</dt><dd class="{{ ui.num() }} text-right">{{ pf.calls }}</dd></div>
+      {% if pf.purposes %}
       <div class="border-b border-line pb-2.5">
         <dt class="sr-only">Davon</dt>
         <dd>
           <ul class="grid gap-1 text-sm">
-            {% for label, calls in api_purposes %}
+            {% for label, calls in pf.purposes %}
             <li class="flex justify-between gap-4 pl-3"><span class="text-muted">{{ label }}</span><span class="{{ ui.num() }}">{{ calls }}</span></li>
             {% endfor %}
           </ul>
         </dd>
       </div>
       {% endif %}
-      {% if api_calls_yesterday %}
-      <div class="{{ fact }}"><dt class="text-muted">Abfragen gestern</dt><dd class="{{ ui.num() }} text-right">{{ api_calls_yesterday }}</dd></div>
+      {% if pf.calls_yesterday %}
+      <div class="{{ fact }}"><dt class="text-muted">Abfragen gestern</dt><dd class="{{ ui.num() }} text-right">{{ pf.calls_yesterday }}</dd></div>
       {% endif %}
-      {% if ebay_check %}
-        {% if ebay_check.ok %}
-          {% if ebay_check.remaining is not none %}
-          <div class="{{ fact }}"><dt class="text-muted">Kontingent laut eBay</dt><dd class="{{ ui.num() }} text-right">{{ ebay_check.remaining }} von {{ ebay_check.limit }} frei</dd></div>
+      {% if pf.check %}
+        {% if pf.check.ok %}
+          {% if pf.check.remaining is not none %}
+          <div class="{{ fact }}"><dt class="text-muted">Kontingent laut {{ pf.name }}</dt><dd class="{{ ui.num() }} text-right">{{ pf.check.remaining }} von {{ pf.check.limit }} frei</dd></div>
           {% endif %}
-          <div class="{{ fact }}"><dt class="text-muted">Letzte Prüfung</dt><dd class="text-right">Verbindung steht, {{ ago(ebay_check.at) }}</dd></div>
+          <div class="{{ fact }}"><dt class="text-muted">Letzte Prüfung</dt><dd class="text-right">Verbindung steht, {{ ago(pf.check.at) }}</dd></div>
         {% else %}
-          <div class="{{ fact }}"><dt class="text-muted">Letzte Prüfung</dt><dd class="text-right text-over">{{ ebay_check.error }}</dd></div>
+          <div class="{{ fact }}"><dt class="text-muted">Letzte Prüfung</dt><dd class="text-right text-over">{{ pf.check.error }}</dd></div>
         {% endif %}
       {% endif %}
     </dl>
-    <form method="post" action="/settings/ebay/test">{{ ui.csrf_field(csrf) }}<button class="{{ ui.button() }}" type="submit" {% if not ebay_configured %}disabled{% endif %}>Verbindung prüfen</button></form>
+    <form method="post" action="/settings/plattform/{{ pf.key }}/test">{{ ui.csrf_field(csrf) }}<button class="{{ ui.button() }}" type="submit" {% if not pf.configured %}disabled{% endif %}>Verbindung prüfen</button></form>
   </div>
 </section>
+{% endfor %}
 
 <section class="{{ panel }}" id="info">
   <div>

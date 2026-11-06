@@ -5,7 +5,7 @@ ihrer Preise. Verkaufte Preise liefert die eBay-API nicht, es sind also Angebots
 
 Woher die Vergleichsangebote kommen (Tabellen market_sources und market_items):
 * search:<Gesuch>  einmal am Tag je Gesuch: Sofortkauf-Angebote zum Suchbegriff, ohne Höchstpreis.
-* epid:<Nummer>    gezielt alle Angebote eines Produkts aus dem eBay-Katalog.
+* epid:<Nummer>    gezielt alle Angebote eines Produkts aus dem Katalog der Plattform (eBay: ePID).
 * nr:<Nummer>      gezielt nach einer Artikelnummer im Titel, z. B. Knipex 87 01 250 oder Festool 576982.
 Gezielt gefragt wird für Angebote unter dem Limit: zuerst, wenn ihnen der Vergleich fehlt, sonst
 wöchentlich, damit der Verlauf weiterwächst. Es gibt ein Tageslimit (Einstellungen).
@@ -51,7 +51,7 @@ from . import config, db, util
 SEARCH_TTL = 86400            # Gesuch-Suche: einmal am Tag neu
 LOOKUP_TTL = 7 * 86400        # gezielte Abfrage: eine Woche gültig
 RETRY_SECONDS = 86400         # fehlgeschlagene Abfrage frühestens morgen wiederholen
-PAGE_SIZE = 200               # eine Antwort (ebay.search mit max_pages=1); weniger = vollständig
+PAGE_SIZE = 200               # eine Antwort (eine Seite der Suche); weniger = vollständig
 MAX_MONTHS = 24               # längster einstellbarer Zeitraum; ältere Vergleichsangebote werden gelöscht
 MONTH = 30.44 * 86400
 MIN_COMPARABLES = 3           # weniger Vergleichsangebote: kein Ø
@@ -384,7 +384,7 @@ class Comparison:
 def _hint(basis: str, number: str | None, same: list[Listing], low: float, high: float, sold: list[float],
           cond: str | None, period: int, with_shipping: bool, own_models: frozenset[str] = frozenset(),
           own_units: int = 1) -> str:
-    what = {"Katalog": "desselben Produkts im eBay-Katalog",
+    what = {"Katalog": "desselben Produkts im Katalog",
             "Nummer": f"mit der Artikelnummer {number}",
             "Modell": f"mit {'dem Modell' if len(own_models) == 1 else 'den Modellen'} "
                       f"{' + '.join(sorted((m.upper() for m in own_models), key=lambda m: (len(m), m)))} und ähnlichem Titel",
@@ -446,20 +446,20 @@ def due(key: str, now: float | None = None) -> bool:
     return now - s["fetched_at"] >= (ttl if s["ok"] else RETRY_SECONDS)
 
 
-def store(key: str, summaries: list[dict] | None, now: float | None = None,
+def store(key: str, listings: list[dict] | None, now: float | None = None,
           complete: bool | None = None) -> int:
-    """Ergänzt den Verlauf um die Antwort einer Abfrage. summaries=None heißt: Abfrage fehlgeschlagen.
+    """Ergänzt den Verlauf um die Antwort einer Abfrage (Angebote in der gemeinsamen Form der Plattformen).
+    listings=None heißt: Abfrage fehlgeschlagen.
     complete: Enthält die Antwort alle Angebote? Nur dann gelten fehlende als verschwunden."""
     now = now or time.time()
     before = source(key)
     db.ex("INSERT INTO market_sources(key, fetched_at, ok, last_used) VALUES (?, ?, ?, ?) "
           "ON CONFLICT(key) DO UPDATE SET fetched_at = excluded.fetched_at, ok = excluded.ok",
-          (key, now, 0 if summaries is None else 1, now))
-    if summaries is None:
+          (key, now, 0 if listings is None else 1, now))
+    if listings is None:
         return 0
     count = 0
-    for summary in summaries:
-        data = util.parse_listing(summary)
+    for data in listings:
         price = data["bin_price"] if data["bin_price"] is not None else data["price"]
         if not data["item_id"] or price is None or data["currency"] != "EUR":
             continue
@@ -472,7 +472,7 @@ def store(key: str, summaries: list[dict] | None, now: float | None = None,
                price, data["shipping"] if data["shipping_known"] else None, data["end_time"], now, now))
         count += 1
     if complete is None:
-        complete = len(summaries) < PAGE_SIZE
+        complete = len(listings) < PAGE_SIZE
     # Nach dem Bearbeiten eines Gesuchs (fetched_at = 0) fehlen Angebote, weil die Suche anders ist,
     # nicht weil sie verkauft sind.
     if complete and before and before["fetched_at"] > 0 and before["ok"]:

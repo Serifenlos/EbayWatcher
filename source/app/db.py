@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS searches (
     lead_minutes        INTEGER NOT NULL DEFAULT 10,
     interval_minutes    INTEGER,                           -- eigenes Suchintervall, leer: Einstellung
     pickup_mode         TEXT NOT NULL DEFAULT 'radius',    -- radius | all | hide
+    platforms           TEXT NOT NULL DEFAULT 'ebay',      -- Plattformen, durch Komma getrennt (plattformen/)
     active              INTEGER NOT NULL DEFAULT 1,
     initialized         INTEGER NOT NULL DEFAULT 0,
     last_run            REAL,
@@ -64,12 +65,13 @@ CREATE TABLE IF NOT EXISTS searches (
 -- Gemerkte Angebote. Bewusst ohne Verkäufer- oder Käuferdaten.
 CREATE TABLE IF NOT EXISTS items (
     search_id       INTEGER NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
-    item_id         TEXT NOT NULL,
+    item_id         TEXT NOT NULL,                         -- eBay: v1|…|0, andere Plattformen: kürzel:nummer
+    platform        TEXT NOT NULL DEFAULT 'ebay',
     title           TEXT,
     url             TEXT,
     image           TEXT,
-    images          TEXT,                  -- alle Bildadressen bei eBay als JSON-Liste (für die Galerie)
-    condition_text  TEXT,                  -- Zustand im Wortlaut von eBay, z. B. „Gebraucht“
+    images          TEXT,                  -- alle Bildadressen bei der Plattform als JSON-Liste (Galerie)
+    condition_text  TEXT,                  -- Zustand im Wortlaut der Plattform, z. B. „Gebraucht“
     is_auction      INTEGER NOT NULL DEFAULT 0,
     has_bin         INTEGER NOT NULL DEFAULT 0,
     price           REAL,
@@ -87,7 +89,7 @@ CREATE TABLE IF NOT EXISTS items (
     near            INTEGER NOT NULL DEFAULT 0,       -- abholbar im eingestellten Umkreis
     remind          INTEGER NOT NULL DEFAULT 0,       -- Knopf „1 Min vorher erinnern“ gedrückt
     reminded        INTEGER NOT NULL DEFAULT 0,       -- Erinnerung ist erledigt
-    epid            TEXT,                              -- Produkt im eBay-Katalog, falls verknüpft
+    epid            TEXT,                              -- Produkt im Katalog der Plattform (eBay: ePID)
     cond            TEXT,                              -- new | used | parts (für den Durchschnittspreis)
     first_seen      REAL NOT NULL,
     last_seen       REAL NOT NULL,
@@ -105,6 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_items_end ON items(status, end_checked, end_time)
 CREATE TABLE IF NOT EXISTS hidden_items (
     search_id   INTEGER NOT NULL REFERENCES searches(id) ON DELETE CASCADE,
     item_id     TEXT NOT NULL,
+    platform    TEXT NOT NULL DEFAULT 'ebay',
     title       TEXT,
     url         TEXT,
     image       TEXT,
@@ -131,7 +134,7 @@ CREATE TABLE IF NOT EXISTS market_items (
     cond      TEXT,
     price       REAL NOT NULL,           -- zuletzt gesehener Preis
     shipping    REAL,
-    end_time    REAL,                    -- Ende laut eBay, falls bekannt
+    end_time    REAL,                    -- Ende laut Plattform, falls bekannt
     first_seen  REAL NOT NULL,
     last_seen   REAL NOT NULL,
     gone_at     REAL,                    -- seitdem nicht mehr online
@@ -140,7 +143,7 @@ CREATE TABLE IF NOT EXISTS market_items (
 );
 
 -- Angaben, die nur getItem liefert (für die Seitenleiste der Galerie, siehe details.py).
--- Je eBay-Angebot einmal, auch wenn es in mehreren Gesuchen steht.
+-- Je Angebot einmal, auch wenn es in mehreren Gesuchen steht.
 CREATE TABLE IF NOT EXISTS item_details (
     item_id         TEXT PRIMARY KEY,
     description     TEXT,      -- Beschreibung des Verkäufers als bereinigter Text (JSON-Liste von Absätzen)
@@ -153,19 +156,24 @@ CREATE TABLE IF NOT EXISTS item_details (
     fetched_at      REAL NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS api_usage (
-    day    TEXT PRIMARY KEY,
-    calls  INTEGER NOT NULL DEFAULT 0
-);
-
--- dieselben Abfragen nach Zweck (ebay.PURPOSES)
-CREATE TABLE IF NOT EXISTS api_calls (
-    day      TEXT NOT NULL,
-    purpose  TEXT NOT NULL,
-    calls    INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (day, purpose)
-);
 """
+
+# Abfragen je Tag und Plattform, dazu dieselben nach Zweck (plattformen/basis.PURPOSES).
+# Eigene Konstanten, weil _migrate die Tabellen aus älteren Versionen (ohne Plattform) neu anlegt.
+API_USAGE = """api_usage (
+    day       TEXT NOT NULL,
+    platform  TEXT NOT NULL DEFAULT 'ebay',
+    calls     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, platform)
+)"""
+API_CALLS = """api_calls (
+    day       TEXT NOT NULL,
+    platform  TEXT NOT NULL DEFAULT 'ebay',
+    purpose   TEXT NOT NULL,
+    calls     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, platform, purpose)
+)"""
+SCHEMA += f"CREATE TABLE IF NOT EXISTS {API_USAGE};\nCREATE TABLE IF NOT EXISTS {API_CALLS};\n"
 
 DEFAULTS: dict[str, str] = {
     "plz": "",
@@ -242,6 +250,25 @@ def _migrate() -> None:
         ex("ALTER TABLE items ADD COLUMN near INTEGER NOT NULL DEFAULT 0")
         radius = setting_int(get_settings(), "radius_km", 50)
         ex("UPDATE items SET near = 1 WHERE pickup = 1 AND (distance_km IS NULL OR distance_km <= ?)", (radius,))
+    # Plattformen (seit Heuhaufen 0.3): Gesuche, Angebote und ausgeblendete Angebote gehören bisher zu eBay
+    for table, column in (("searches", "platforms"), ("items", "platform"), ("hidden_items", "platform")):
+        if column not in {r["name"] for r in q(f"PRAGMA table_info({table})")}:
+            ex(f"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT 'ebay'")
+    # Abfragen je Plattform: Tabellen mit neuem Schlüssel anlegen, die bisherigen Zahlen gelten für eBay
+    if "platform" not in {r["name"] for r in q("PRAGMA table_info(api_usage)")}:
+        with _lock:
+            _conn.executescript(f"""
+                BEGIN;
+                ALTER TABLE api_usage RENAME TO api_usage_alt;
+                ALTER TABLE api_calls RENAME TO api_calls_alt;
+                CREATE TABLE {API_USAGE};
+                CREATE TABLE {API_CALLS};
+                INSERT INTO api_usage(day, platform, calls) SELECT day, 'ebay', calls FROM api_usage_alt;
+                INSERT INTO api_calls(day, platform, purpose, calls) SELECT day, 'ebay', purpose, calls FROM api_calls_alt;
+                DROP TABLE api_usage_alt;
+                DROP TABLE api_calls_alt;
+                COMMIT;
+            """)
     # Durchschnittspreis: aus der Momentaufnahme wird ein Preisverlauf
     columns = {r["name"] for r in q("PRAGMA table_info(market_items)")}
     for name, kind in (("end_time", "REAL"), ("first_seen", "REAL"), ("last_seen", "REAL"),
@@ -315,25 +342,26 @@ def _today(days_back: int = 0) -> str:
     return (datetime.now(ZoneInfo(config.TZ)).date() - timedelta(days=days_back)).isoformat()
 
 
-def count_api_call(purpose: str = "suche", n: int = 1) -> None:
+def count_api_call(purpose: str = "suche", n: int = 1, platform: str = "ebay") -> None:
     day = _today()
     with _lock:
-        ex("INSERT INTO api_usage(day, calls) VALUES(?, ?) ON CONFLICT(day) DO UPDATE SET calls = calls + ?",
-           (day, n, n))
-        ex("INSERT INTO api_calls(day, purpose, calls) VALUES(?, ?, ?) "
-           "ON CONFLICT(day, purpose) DO UPDATE SET calls = calls + ?", (day, purpose, n, n))
+        ex("INSERT INTO api_usage(day, platform, calls) VALUES(?, ?, ?) "
+           "ON CONFLICT(day, platform) DO UPDATE SET calls = calls + ?", (day, platform, n, n))
+        ex("INSERT INTO api_calls(day, platform, purpose, calls) VALUES(?, ?, ?, ?) "
+           "ON CONFLICT(day, platform, purpose) DO UPDATE SET calls = calls + ?", (day, platform, purpose, n, n))
 
 
-def api_calls_today() -> int:
-    row = q1("SELECT calls FROM api_usage WHERE day = ?", (_today(),))
+def api_calls_today(platform: str = "ebay") -> int:
+    row = q1("SELECT calls FROM api_usage WHERE day = ? AND platform = ?", (_today(), platform))
     return row["calls"] if row else 0
 
 
-def api_calls_by_purpose(days_back: int = 0) -> dict[str, int]:
+def api_calls_by_purpose(days_back: int = 0, platform: str = "ebay") -> dict[str, int]:
     """Abfragen eines Tages nach Zweck; „ohne Zuordnung“ sind Abfragen von vor dem Update."""
     day = _today(days_back)
-    result = {r["purpose"]: r["calls"] for r in q("SELECT purpose, calls FROM api_calls WHERE day = ?", (day,))}
-    row = q1("SELECT calls FROM api_usage WHERE day = ?", (day,))
+    result = {r["purpose"]: r["calls"] for r in q("SELECT purpose, calls FROM api_calls WHERE day = ? AND platform = ?",
+                                                   (day, platform))}
+    row = q1("SELECT calls FROM api_usage WHERE day = ? AND platform = ?", (day, platform))
     rest = (row["calls"] if row else 0) - sum(result.values())
     if rest > 0:
         result["ohne"] = rest

@@ -1,15 +1,16 @@
-"""Bild-Cache: Artikelbilder einmal bei eBay holen und danach selbst ausliefern.
+"""Bild-Cache: Artikelbilder einmal bei der Plattform (eBay …) holen und danach selbst ausliefern.
 
-* Seiten und Benachrichtigungen verweisen auf /bild/<Gesuch>/<Artikel>?v=…&s=… statt auf eBay.
+* Seiten und Benachrichtigungen verweisen auf /bild/<Gesuch>/<Artikel>?v=…&s=… statt auf die Plattform.
   Die Galerie (Klick aufs Vorschaubild) nutzt dieselbe Adresse mit &n=<Nummer des Bildes>&g=1 für groß.
 * s ist eine Signatur. Gültig sind nur Adressen, die Heuhaufen selbst erzeugt hat. Deshalb kommt die
   Adresse ohne Login aus (ntfy auf dem Handy kann das Bild laden), lässt sich aber nicht für fremde
   Artikel oder Seiten missbrauchen. v ändert sich, wenn der Verkäufer das Bild austauscht.
-* Die eBay-Adressen der Bilder stehen in der eigenen Datenbank. Geladen wird nur von eBay-Servern,
-  für Listen und Benachrichtigungen in 500 px, für die Galerie in 1600 px.
+* Die Adressen der Bilder stehen in der eigenen Datenbank. Geladen wird nur von den Bild-Servern der
+  Plattformen (Plattform.image_hosts), für Listen und Benachrichtigungen in 500 px, für die Galerie in
+  1600 px (die Plattform rechnet die Adresse um, Plattform.image).
 * Die Dateien liegen im Datenordner unter cache/bilder. Die stündliche Pflege löscht Bilder, die
   14 Tage nicht angezeigt wurden, und hält den Ordner unter 500 MB.
-* Klappt das Laden nicht, schickt Heuhaufen den Browser direkt zu eBay (wie ohne Cache).
+* Klappt das Laden nicht, schickt Heuhaufen den Browser direkt zur Plattform (wie ohne Cache).
 """
 from __future__ import annotations
 
@@ -26,7 +27,8 @@ from urllib.parse import quote, urljoin, urlsplit
 
 import httpx
 
-from . import config, db, signed, util
+from . import config, db, signed
+from .plattformen import liste as plattformen
 
 log = logging.getLogger("heuhaufen.bilder")
 
@@ -38,8 +40,7 @@ MAX_IMAGE_BYTES = 5 * 1024 * 1024
 RETRY_SECONDS = 3600                    # nach einem Fehlschlag frühestens nach einer Stunde neu versuchen
 CLEANUP_SECONDS = 3600
 BROWSER_CACHE_SECONDS = 7 * 86400
-ALLOWED_HOSTS = (".ebayimg.com", ".ebaystatic.com")
-MAX_PARALLEL = 6                        # gleichzeitige Downloads bei eBay
+MAX_PARALLEL = 6                        # gleichzeitige Downloads
 THUMB_SIZE = 500                        # Listen, Karten, Benachrichtigungen
 GALLERY_SIZE = 1600                     # Galerie: so groß, wie eBay die Bilder höchstens herausgibt
 
@@ -68,7 +69,7 @@ def valid(search_id: int, item_id: str, signature: str | None) -> bool:
 
 
 def originals(search_id: int, item_id: str) -> list[str]:
-    """eBay-Adressen aller Bilder eines Angebots, das Hauptbild zuerst. Aus dem gemerkten Angebot,
+    """Adressen aller Bilder eines Angebots bei der Plattform, das Hauptbild zuerst. Aus dem gemerkten Angebot,
     sonst aus der Kopie bei „Ausgeblendet“ (dort nur das Hauptbild)."""
     row = db.q1("SELECT image, images FROM items WHERE search_id = ? AND item_id = ?", (search_id, item_id))
     if row:
@@ -84,18 +85,24 @@ def originals(search_id: int, item_id: str) -> list[str]:
     return [row["image"]] if row and row["image"] else []
 
 
+def _platform(search_id: int, item_id: str):
+    row = (db.q1("SELECT platform FROM items WHERE search_id = ? AND item_id = ?", (search_id, item_id))
+           or db.q1("SELECT platform FROM hidden_items WHERE search_id = ? AND item_id = ?", (search_id, item_id)))
+    return plattformen.get(row["platform"] if row else None)
+
+
 def source(search_id: int, item_id: str, n: int = 0, big: bool = False) -> str | None:
-    """eBay-Adresse eines Bildes in der Größe, in der Heuhaufen es lädt."""
+    """Adresse eines Bildes bei der Plattform, in der Größe, in der Heuhaufen es lädt."""
     found = originals(search_id, item_id)
     if not 0 <= n < len(found):
         return None
-    return util.large_image(found[n], GALLERY_SIZE if big else THUMB_SIZE)
+    return _platform(search_id, item_id).image(found[n], GALLERY_SIZE if big else THUMB_SIZE)
 
 
 def allowed(address: str) -> bool:
     parts = urlsplit(address)
     host = (parts.hostname or "").lower()
-    return parts.scheme == "https" and host.endswith(ALLOWED_HOSTS)
+    return parts.scheme == "https" and host.endswith(plattformen.image_hosts())
 
 
 # ---------------------------------------------------------------- Cache
@@ -212,7 +219,7 @@ async def close() -> None:
 
 
 async def _download(address: str) -> bytes | None:
-    for _ in range(3):   # Weiterleitungen nur folgen, solange sie bei eBay bleiben
+    for _ in range(3):   # Weiterleitungen nur folgen, solange sie bei den Bild-Servern bleiben
         async with _client().stream("GET", address) as r:
             if r.is_redirect:
                 address = urljoin(address, r.headers.get("location", ""))
@@ -220,7 +227,7 @@ async def _download(address: str) -> bytes | None:
                     return None
                 continue
             if r.status_code != 200:
-                log.info("Bild bei eBay nicht abrufbar (Fehler %s)", r.status_code)
+                log.info("Bild nicht abrufbar (Fehler %s)", r.status_code)
                 return None
             data = bytearray()
             async for chunk in r.aiter_bytes():
@@ -248,7 +255,7 @@ def _touch(path: Path) -> None:
 
 
 async def cached(address: str) -> Path | None:
-    """Datei im Cache; beim ersten Mal wird das Bild bei eBay geladen. None, wenn das nicht klappt."""
+    """Datei im Cache; beim ersten Mal wird das Bild bei der Plattform geladen. None, wenn das nicht klappt."""
     if not allowed(address):
         return None
     path = _path(address)
@@ -268,7 +275,7 @@ async def cached(address: str) -> Path | None:
                 async with _parallel:
                     data = await _download(address)
             except httpx.HTTPError as e:
-                log.info("Bild bei eBay nicht abrufbar (%s)", e.__class__.__name__)
+                log.info("Bild nicht abrufbar (%s)", e.__class__.__name__)
                 data = None
             if not data or not _image_type(data[:16]):
                 _failed[path.name] = time.time()

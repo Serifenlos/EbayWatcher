@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import re
 import secrets
 import time
@@ -17,7 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import auth, config, db, details, images, market, notify, signed, util
-from .ebay import PURPOSES, EbayError
+from .plattformen import liste as plattformen
+from .plattformen.basis import PURPOSES, PlatformError
 from .watcher import Watcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -32,6 +34,7 @@ watcher = Watcher()
 async def lifespan(_app: FastAPI):
     db.init()
     auth.ensure_admin()
+    plattformen.adopt_from_environment(dict(os.environ), log)
     watcher.start()
     log.info("Heuhaufen %s läuft.", config.APP_VERSION)
     yield
@@ -91,7 +94,8 @@ MESSAGES = {
     "2fa_on": "Die Zwei-Faktor-Anmeldung ist aktiv.",
     "2fa_off": "Die Zwei-Faktor-Anmeldung ist ausgeschaltet.",
     "sessions": "Alle anderen Geräte sind abgemeldet.",
-    "ebay": "Verbindung zu eBay geprüft.",
+    "checked": "Verbindung geprüft.",
+    "credentials": "Zugangsdaten gespeichert.",
     "hidden": "Angebot ausgeblendet.",
     "market": "Gespeichert. Neue Vergleichsangebote holt Heuhaufen in den nächsten Minuten.",
     "display": "Gespeichert.",
@@ -99,9 +103,9 @@ MESSAGES = {
     "logout": "Du bist abgemeldet.",
 }
 
-# Bilder kommen aus dem eigenen Cache; eBay nur, falls der Cache ein Bild nicht laden konnte
-CSP = ("default-src 'self'; img-src 'self' data: https://*.ebayimg.com https://*.ebaystatic.com; "
-       "style-src 'self'; script-src 'self'; "
+# Bilder kommen aus dem eigenen Cache; von den Plattformen nur, falls der Cache ein Bild nicht laden konnte
+CSP = ("default-src 'self'; img-src 'self' data: " + " ".join(f"https://*{h}" for h in plattformen.image_hosts())
+       + "; style-src 'self'; script-src 'self'; "
        "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 # /bild/ und /erinnern/ ohne Login: Sie ruft das Handy aus der Benachrichtigung auf. Geschützt durch die Signatur.
 PUBLIC_PREFIXES = ("/login", "/static/", "/healthz", "/favicon", "/bild/", "/erinnern/")
@@ -235,7 +239,7 @@ async def remind_item(request: Request, sid: int, item_id: str):
 
 @app.api_route("/bild/{sid}/{item_id}", methods=["GET", "HEAD"])
 async def article_image(request: Request, sid: int, item_id: str):
-    """Artikelbild aus dem Bild-Cache. Beim ersten Abruf lädt Heuhaufen es einmal bei eBay.
+    """Artikelbild aus dem Bild-Cache. Beim ersten Abruf lädt Heuhaufen es einmal bei der Plattform.
     n: Nummer des Bildes (Galerie), g=1: groß."""
     if not images.valid(sid, item_id, request.query_params.get("s")):
         return PlainTextResponse("Ungültige Bildadresse.", 403)
@@ -247,7 +251,7 @@ async def article_image(request: Request, sid: int, item_id: str):
         return PlainTextResponse("Bild nicht gefunden.", 404)
     path = await images.cached(address)
     if not path:
-        # Notlösung: der Browser holt das Bild selbst bei eBay, wie ohne Cache
+        # Notlösung: der Browser holt das Bild selbst bei der Plattform, wie ohne Cache
         return RedirectResponse(address, 302, headers={"Cache-Control": "no-store"})
     return FileResponse(path, media_type=images.media_type(path),
                         headers={"Cache-Control": f"private, max-age={images.BROWSER_CACHE_SECONDS}"})
@@ -256,14 +260,16 @@ async def article_image(request: Request, sid: int, item_id: str):
 @app.get("/galerie/{sid}/{item_id}")
 async def gallery(sid: int, item_id: str):
     """Bilder eines Angebots für die Galerie (PhotoSwipe, siehe app.js), mit Breite und Höhe, dazu die
-    Seitenleiste (panel) als fertiges HTML. Beim ersten Öffnen lädt Heuhaufen alle Bilder groß bei eBay
-    und legt sie in den Bild-Cache. Beschreibung und Gebote holt es mit einer Einzelabfrage, höchstens alle
-    10 Minuten (details.py)."""
+    Seitenleiste (panel) als fertiges HTML. Beim ersten Öffnen lädt Heuhaufen alle Bilder groß bei der
+    Plattform und legt sie in den Bild-Cache. Beschreibung und Gebote holt es mit einer Einzelabfrage,
+    höchstens alle 10 Minuten (details.py)."""
     row = db.q1("SELECT * FROM items WHERE search_id = ? AND item_id = ?", (sid, item_id))
-    if row and row["status"] == "active" and watcher.ebay.configured and details.due(item_id):
+    settings = db.get_settings()
+    p = plattformen.of_item(row) if row else None
+    if row and row["status"] == "active" and p.details and p.configured(settings) and details.due(item_id):
         try:
-            await watcher.refresh(row, db.get_settings())
-        except EbayError as e:
+            await watcher.refresh(row, settings)
+        except PlatformError as e:
             log.info("Galerie %s: %s", item_id, e)   # dann eben mit dem letzten bekannten Stand
     found = images.originals(sid, item_id)
     if not found:
@@ -273,7 +279,7 @@ async def gallery(sid: int, item_id: str):
     items = []
     for n, (original, path) in enumerate(zip(found, paths)):
         size = images.dimensions(path) if path else None
-        if size:   # Bilder, die eBay gerade nicht liefert, fehlen in der Galerie
+        if size:   # Bilder, die die Plattform gerade nicht liefert, fehlen in der Galerie
             items.append({"src": images.url(sid, item_id, original, n, big=True), "width": size[0], "height": size[1]})
     return JSONResponse({"items": items, "panel": _gallery_panel(sid, item_id)}, headers={"Cache-Control": "no-store"})
 
@@ -294,7 +300,7 @@ def _gallery_panel(sid: int, item_id: str) -> str:
     if v is None:
         v = next((h for h in _hidden_views(s, now) if h["item_id"] == item_id), None)
     row = db.q1("SELECT * FROM items WHERE search_id = ? AND item_id = ?", (sid, item_id))
-    if v is None and row:   # beendet oder bei eBay verschwunden
+    if v is None and row:   # beendet oder bei der Plattform verschwunden
         v = {**util.item_view(row, s, now), "kind": "Beendet", "end_time": None, "market": None}
     if v is None:
         return ""
@@ -412,9 +418,10 @@ async def logout(request: Request):
 def _notices() -> list[dict]:
     s = db.get_settings()
     out = []
-    if not watcher.ebay.configured:
-        out.append({"text": "Die eBay-Zugangsdaten fehlen. Trage EBAY_CLIENT_ID und EBAY_CLIENT_SECRET "
-                            "im Portainer-Stack ein und starte den Container neu."})
+    if not plattformen.any_configured(s):
+        p = plattformen.get(plattformen.DEFAULT)
+        out.append({"text": f"Die Zugangsdaten für {p.name} fehlen, deshalb sucht Heuhaufen noch nicht.",
+                    "link": f"/settings#{p.key}", "action": "Eintragen"})
     if not notify.configured(s):
         out.append({"text": "Benachrichtigungen sind noch nicht eingerichtet.",
                     "link": "/settings#benachrichtigungen", "action": "Einrichten"})
@@ -586,9 +593,9 @@ async def hide_item(request: Request, sid: int):
     if not item:
         return not_found(request)
     db.ex(
-        "INSERT INTO hidden_items(search_id, item_id, title, url, image, hidden_at) VALUES (?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(search_id, item_id) DO NOTHING",
-        (sid, item_id, item["title"], item["url"], item["image"], time.time()),
+        "INSERT INTO hidden_items(search_id, item_id, platform, title, url, image, hidden_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(search_id, item_id) DO NOTHING",
+        (sid, item_id, item["platform"], item["title"], item["url"], item["image"], time.time()),
     )
     return back(f"/searches/{sid}", "hidden", anchor="treffer")
 
@@ -664,20 +671,28 @@ def _settings_page(request: Request, errors: dict | None = None, values: dict | 
         for x in db.q("SELECT * FROM sessions WHERE user_id = ? AND pending_2fa = 0 ORDER BY last_seen DESC",
                       (user["id"],))
     ]
-    s = {**db.get_settings(), **(values or {})}
+    stored = db.get_settings()
+    s = {**stored, **(values or {})}
     return render(request, "settings.html", status_code=status, active="settings", s=s, user=user,
-                  errors=errors or {}, sessions=sessions, ebay_configured=watcher.ebay.configured,
-                  ebay_check=watcher.last_ebay_check, ntfy_error=watcher.last_ntfy_error,
-                  api_calls=db.api_calls_today(), api_purposes=_api_purposes(),
-                  api_calls_yesterday=sum(db.api_calls_by_purpose(1).values()), has_token=bool(s.get("ntfy_token")),
+                  errors=errors or {}, sessions=sessions, platforms=_platform_panels(stored),
+                  ntfy_error=watcher.last_ntfy_error, has_token=bool(s.get("ntfy_token")),
                   image_cache=images.stats(), market_lookups_today=market.lookups_today())
 
 
-def _api_purposes() -> list[tuple[str, int]]:
-    """Heutige Abfragen nach Zweck, in fester Reihenfolge, nur Zwecke mit Abfragen."""
-    calls = db.api_calls_by_purpose()
+def _platform_panels(settings: dict) -> list[dict]:
+    """Je Plattform: Zugangsdaten, Abfragen heute nach Zweck (feste Reihenfolge), gestern, letzte Prüfung."""
     labels = {**PURPOSES, "ohne": "Vor dem Update, ohne Zuordnung"}
-    return [(label, calls[key]) for key, label in labels.items() if calls.get(key)]
+    out = []
+    for p in plattformen.ALL.values():
+        calls = db.api_calls_by_purpose(platform=p.key)
+        out.append({
+            "key": p.key, "name": p.name, "credentials": p.credentials, "configured": p.configured(settings),
+            "check": watcher.last_checks.get(p.key), "calls": db.api_calls_today(p.key),
+            "purposes": [(label, calls[key]) for key, label in labels.items() if calls.get(key)],
+            "calls_yesterday": sum(db.api_calls_by_purpose(1, p.key).values()),
+            "hints": {c.key: plattformen.secret_hint(settings, c.key) for c in p.credentials if c.secret},
+        })
+    return out
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -830,8 +845,25 @@ async def revoke_sessions(request: Request):
     return back("/settings", "sessions", anchor="sicherheit")
 
 
-@app.post("/settings/ebay/test")
-async def test_ebay(request: Request):
+@app.post("/settings/plattform/{key}")
+async def save_platform(request: Request, key: str):
+    """Zugangsdaten einer Plattform speichern und gleich prüfen."""
+    form = await checked_form(request)
+    p = plattformen.ALL.get(key)
+    if not p:
+        return not_found(request)
+    plattformen.save_credentials(p, form)
+    watcher.last_checks.pop(p.key, None)
+    if p.configured(db.get_settings()):
+        await watcher.check_platform(p.key)
+        watcher.poke()
+    return back("/settings", "credentials", anchor=p.key)
+
+
+@app.post("/settings/plattform/{key}/test")
+async def test_platform(request: Request, key: str):
     await checked_form(request)
-    await watcher.test_ebay()
-    return back("/settings", "ebay", anchor="ebay")
+    if key not in plattformen.ALL:
+        return not_found(request)
+    await watcher.check_platform(key)
+    return back("/settings", "checked", anchor=key)

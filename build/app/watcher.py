@@ -7,6 +7,9 @@ Zwei getrennte Abläufe:
   Benachrichtigung „1 Min vorher erinnern“ gedrückt, wird sie 1 Minute vor Ende noch einmal geprüft.
 Sofortkauf-Angebote unter dem Limit werden direkt beim Entdecken gemeldet.
 Dazu alle paar Minuten: Vergleichsangebote für den Durchschnittspreis holen (market.py).
+
+Wie gesucht wird, entscheidet die Plattform (plattformen/, z. B. ebay.py). Hier steht nur, was für alle
+gilt: Limit, Ausschlusswörter, Ausgeblendete, Endspurt, Erinnerung, Benachrichtigungen.
 """
 from __future__ import annotations
 
@@ -17,41 +20,39 @@ import time
 from urllib.parse import quote
 
 from . import db, details, images, market, notify, signed, util
-from .ebay import EbayClient, EbayError
+from .plattformen import liste as plattformen
+from .plattformen.basis import Plattform, PlatformError
 
 log = logging.getLogger("heuhaufen")
 
 TICK_SECONDS = 30
 MAX_SINGLE_PUSHES = 5          # mehr neue Sofortkauf-Treffer auf einmal -> eine Sammelnachricht
-PICKUP_RADIUS_ALL_KM = 1000    # Abholmodus "alle anzeigen": praktisch ganz Deutschland
-MAX_END_LOOKUPS = 15           # fehlende Endzeiten pro Lauf über getItem nachladen
+MAX_END_LOOKUPS = 15           # fehlende Endzeiten pro Lauf über die Einzelabfrage nachladen
 MARKET_EVERY = 300             # Durchschnittspreis: alle 5 Minuten nachsehen, ob etwas zu holen ist …
 MARKET_LOOKUPS_PER_RUN = 3     # … und dann höchstens so viele gezielte Abfragen auf einmal
-PICKUP_EVERY = 3600            # Abholsuche höchstens stündlich; Abholangebote ändern sich selten
-SPLIT_FOR = 6 * 3600           # „Beides“ mit mehr als 200 Treffern: so lange gleich getrennt suchen
 
 ITEM_FIELDS = [
-    "title", "url", "image", "images", "is_auction", "has_bin", "price", "bin_price", "currency",
+    "platform", "title", "url", "image", "images", "is_auction", "has_bin", "price", "bin_price", "currency",
     "shipping", "shipping_known", "bid_count", "end_time", "country", "location_text",
     "pickup", "pickup_only", "distance_km", "near", "epid", "cond", "condition_text",
 ]
-FORMATS = {"auction": ["AUCTION"], "fixed": ["FIXED_PRICE"], "both": ["AUCTION", "FIXED_PRICE"]}
 
 
 class Watcher:
     REMIND_BEFORE = 60          # „1 Min vorher erinnern“: so viele Sekunden vor Ende kommt der Hinweis
-    REMIND_LEAD = 8             # … und so viel früher wird bei eBay nachgesehen (Zeit für Abfrage und Versand)
+    REMIND_LEAD = 8             # … und so viel früher wird nachgesehen (Zeit für Abfrage und Versand)
 
     def __init__(self) -> None:
-        self.ebay = EbayClient()
         self.wake = asyncio.Event()
         self.task: asyncio.Task | None = None
         self.last_tick: float | None = None
-        self.last_ebay_check: dict | None = None
+        self.last_checks: dict[str, dict] = {}       # Plattform → Ergebnis von „Verbindung prüfen“
         self.last_ntfy_error: str | None = None
         self._market_next = 0.0
-        self._pickup_runs: dict[int, float] = {}    # Gesuch → letzte Abholsuche
-        self._split_until: dict[int, float] = {}    # Gesuch → bis dann Auktion und Sofortkauf getrennt suchen
+
+    @staticmethod
+    def platform(key: str) -> Plattform:
+        return plattformen.get(key)
 
     # ------------------------------------------------------------ Lebenszyklus
 
@@ -63,14 +64,15 @@ class Watcher:
             self.task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self.task
-        await self.ebay.close()
+        await plattformen.close()
 
     def poke(self) -> None:
         self.wake.set()
 
     def forget_pickup(self) -> None:
         """PLZ oder Umkreis geändert: beim nächsten Lauf jedes Gesuchs auch die Abholsuche machen."""
-        self._pickup_runs.clear()
+        for p in plattformen.ALL.values():
+            p.forget_pickup()
 
     @staticmethod
     def interval_seconds(s: dict, settings: dict) -> int:
@@ -106,9 +108,9 @@ class Watcher:
         self.last_tick = time.time()
         db.prune()
         images.cleanup_if_due()
-        if not self.ebay.configured:
-            return
         settings = db.get_settings()
+        if not plattformen.any_configured(settings):
+            return
         await self.check_endings(settings)
         await self.check_reminders(settings)
         for s in db.q("SELECT * FROM searches WHERE active = 1 ORDER BY id"):
@@ -119,84 +121,25 @@ class Watcher:
 
     # ------------------------------------------------------------ Entdecken
 
-    @staticmethod
-    def _base_filters(s: dict) -> list[str]:
-        f = [f"price:[..{s['max_price']:.2f}]", "priceCurrency:EUR"]
-        if s["condition"] == "new":
-            f.append("conditions:{NEW}")
-        elif s["condition"] == "used":
-            f.append("conditions:{USED}")
-        return f
-
-    @staticmethod
-    def _location_filter(s: dict) -> str:
-        return {
-            "DE": "itemLocationCountry:DE",
-            "EU": "itemLocationRegion:EUROPEAN_UNION",
-        }.get(s["location"], "itemLocationRegion:WORLDWIDE")
-
-    async def _search_shipped(self, s: dict, formats: list[str], plz: str, now: float) -> list[dict]:
-        """Angebote mit Versand nach Deutschland. Bei „Beides“ möglichst mit einer Abfrage für beide
-        Formate: passen alle Treffer auf eine Seite (bis 200), reicht sie. Sonst getrennt, Auktionen nach
-        Ende sortiert, Sofortkauf nach Neuheit, je bis zu 3 Seiten."""
-        def filters(fmts: list[str]) -> list[str]:
-            f = self._base_filters(s) + [
-                self._location_filter(s),
-                "buyingOptions:{" + "|".join(fmts) + "}",
-                "deliveryCountry:DE",  # nur Angebote, die nach Deutschland versendet werden
-            ]
-            if s["free_shipping_only"]:
-                f.append("maxDeliveryCost:0")
-            return f
-
-        found: list[dict] = []
-        if len(formats) > 1 and now >= self._split_until.get(s["id"], 0):
-            together = await self.ebay.search(s["query"], filters(formats), None, plz, max_pages=1)
-            if getattr(together, "complete", True):
-                return list(together)
-            self._split_until[s["id"]] = now + SPLIT_FOR   # zu viele Treffer: eine Weile gleich getrennt
-            found.extend(together)
-        for fmt in formats:
-            sort = "endingSoonest" if fmt == "AUCTION" else "newlyListed"
-            found.extend(await self.ebay.search(s["query"], filters([fmt]), sort, plz))
-        return found
-
     async def discover(self, s: dict, settings: dict) -> None:
+        """Neue Angebote eines Gesuchs auf allen seinen Plattformen."""
         now = time.time()
-        plz = (settings.get("plz") or "").strip()
+        errors = []
+        for p in plattformen.of_search(s):
+            if not p.configured(settings):
+                continue
+            try:
+                await self._discover_on(p, s, settings, now)
+            except PlatformError as e:
+                log.warning("Gesuch %s (%s): %s", s["id"], p.name, e)
+                errors.append(str(e) if len(plattformen.of_search(s)) == 1 else f"{p.name}: {e}")
+        db.ex("UPDATE searches SET last_run = ?, last_error = ?, initialized = CASE WHEN ? THEN initialized ELSE 1 END "
+              "WHERE id = ?", (now, "; ".join(errors) or None, bool(errors), s["id"]))
+
+    async def _discover_on(self, p: Plattform, s: dict, settings: dict, now: float) -> None:
         radius = db.setting_int(settings, "radius_km", 50)
-        formats = FORMATS.get(s["format"], ["AUCTION"])
-        pickup_wanted = s["pickup_mode"] != "hide" and bool(plz)
-        pickup_now = pickup_wanted and (s["last_run"] is None
-                                        or now - self._pickup_runs.get(s["id"], 0) >= PICKUP_EVERY)
-        keep_pickup = pickup_wanted and not pickup_now   # dazwischen gilt, was die letzte Abholsuche fand
-        found: dict[str, tuple[dict, bool]] = {}
-
-        try:
-            for summary in await self._search_shipped(s, formats, plz, now):
-                if summary.get("itemId"):
-                    found[summary["itemId"]] = (summary, False)
-
-            if pickup_now:
-                search_radius = radius if s["pickup_mode"] == "radius" else PICKUP_RADIUS_ALL_KM
-                filters = self._base_filters(s) + [
-                    "buyingOptions:{" + "|".join(formats) + "}",
-                    "deliveryOptions:{SELLER_ARRANGED_LOCAL_PICKUP}",
-                    "pickupCountry:DE",
-                    f"pickupPostalCode:{plz}",
-                    f"pickupRadius:{search_radius}",
-                    "pickupRadiusUnit:km",
-                ]
-                for summary in await self.ebay.search(s["query"], filters, None, plz):
-                    item_id = summary.get("itemId")
-                    if item_id:   # auch Angebote mit Versand: so kennt Heuhaufen die Entfernung
-                        found[item_id] = (summary, True)
-        except EbayError as e:
-            log.warning("Gesuch %s: %s", s["id"], e)
-            db.ex("UPDATE searches SET last_run = ?, last_error = ? WHERE id = ?", (now, str(e), s["id"]))
-            return
-        if pickup_now:
-            self._pickup_runs[s["id"]] = now
+        result = await p.find(s, settings, now)
+        keep_pickup = result.keep_pickup
 
         excluded = util.exclusion_words(s["exclude"])
         hidden = db.hidden_ids(s["id"])   # von Hand ausgeblendet: weiter aktualisieren, aber nie melden
@@ -205,11 +148,11 @@ class Watcher:
         new_fixed: list[dict] = []
         as_fixed = {**s, "format": "fixed"}
 
-        for item_id, (summary, pickup) in found.items():
+        for item_id, (raw, pickup) in result.items.items():
             existing = db.q1("SELECT * FROM items WHERE search_id = ? AND item_id = ?", (s["id"], item_id))
             if keep_pickup and existing and existing["pickup"]:
                 pickup = True   # ohne Abholsuche: Abholung und Entfernung von der letzten übernehmen
-            data = util.parse_listing(summary, pickup)
+            data = p.parse(raw, pickup)
             if pickup and data["distance_km"] is None and existing:
                 data["distance_km"] = existing["distance_km"]
             # Abholbar im eingestellten Umkreis: dann zählt der Preis ohne Versand
@@ -241,8 +184,9 @@ class Watcher:
                     new_fixed.append(view)
 
         # Nicht mehr gefunden: über Limit, beendet oder Filter geändert. Abholangebote prüft erst die
-        # nächste Abholsuche.
-        for row in db.q("SELECT item_id, pickup FROM items WHERE search_id = ? AND status = 'active'", (s["id"],)):
+        # nächste Abholsuche. Nur Angebote dieser Plattform, die anderen hat sie nicht gesucht.
+        for row in db.q("SELECT item_id, pickup FROM items WHERE search_id = ? AND platform = ? AND status = 'active'",
+                        (s["id"], p.key)):
             if row["item_id"] not in seen and not (keep_pickup and row["pickup"]):
                 db.ex("UPDATE items SET status = 'dropped' WHERE search_id = ? AND item_id = ?",
                       (s["id"], row["item_id"]))
@@ -250,18 +194,16 @@ class Watcher:
         # Manche Suchergebnisse liefern bei Auktionen keine Endzeit mit
         for item_id in missing_end[:MAX_END_LOOKUPS]:
             try:
-                detail = await self.ebay.get_item(item_id, plz)
-            except EbayError:
+                got = await p.fetch(item_id, settings, "suche")
+            except PlatformError:
                 break
-            if detail:
-                details.store(item_id, detail)   # Beschreibung für die Galerie gleich mitnehmen
-            end = util.parse_listing(detail)["end_time"] if detail else None
+            if got and got[1]:
+                details.store(item_id, got[1])   # Beschreibung für die Galerie gleich mitnehmen
+            end = got[0]["end_time"] if got else None
             if end:
                 db.ex("UPDATE items SET end_time = ? WHERE search_id = ? AND item_id = ?", (end, s["id"], item_id))
 
         await self._notify_fixed(s, settings, new_fixed)
-        db.ex("UPDATE searches SET last_run = ?, last_error = NULL, initialized = 1 WHERE id = ?",
-              (now, s["id"]))
 
     # ------------------------------------------------------------ Endspurt
 
@@ -282,15 +224,14 @@ class Watcher:
         )
         if not rows:
             return
-        plz = (settings.get("plz") or "").strip()
 
         for row in rows:
             s = db.q1("SELECT * FROM searches WHERE id = ?", (row["search_id"],))
-            if not s:
+            if not s or not plattformen.of_item(row).configured(settings):
                 continue
             try:
-                item = await self._fresh_item(row, plz, "endspurt")
-            except EbayError as e:
+                item = await self._fresh_item(row, settings, "endspurt")
+            except PlatformError as e:
                 log.warning("Endspurt-Prüfung %s: %s", row["item_id"], e)
                 return  # beim nächsten Takt erneut versuchen
 
@@ -321,19 +262,20 @@ class Watcher:
 
     async def refresh(self, row: dict, settings: dict) -> dict | None:
         """Galerie: aktueller Stand eines Angebots samt Beschreibung und Geboten (details.py)."""
-        return await self._fresh_item(row, (settings.get("plz") or "").strip(), "galerie")
+        return await self._fresh_item(row, settings, "galerie")
 
-    async def _fresh_item(self, row: dict, plz: str, purpose: str) -> dict | None:
-        """Aktueller Stand eines gemerkten Angebots über getItem (eine Abfrage). None: bei eBay nicht mehr da.
-        Beschreibung, Merkmale und Gebote landen nebenbei in details.py."""
-        detail = await self.ebay.get_item(row["item_id"], plz, purpose=purpose)
-        if detail is None:
+    async def _fresh_item(self, row: dict, settings: dict, purpose: str) -> dict | None:
+        """Aktueller Stand eines gemerkten Angebots über die Einzelabfrage der Plattform (eine Abfrage).
+        None: dort nicht mehr da. Beschreibung, Merkmale und Gebote landen nebenbei in details.py."""
+        got = await plattformen.of_item(row).fetch(row["item_id"], settings, purpose, bool(row["pickup"]))
+        if got is None:
             db.ex("UPDATE items SET status = 'gone' WHERE search_id = ? AND item_id = ?",
                   (row["search_id"], row["item_id"]))
             return None
-        details.store(row["item_id"], detail)
-        fresh = util.parse_listing(detail, bool(row["pickup"]))
-        # Was getItem nicht (zuverlässig) liefert, aus der Suche übernehmen
+        fresh, info = got
+        if info:
+            details.store(row["item_id"], info)
+        # Was die Einzelabfrage nicht (zuverlässig) liefert, aus der Suche übernehmen
         for field in ("pickup", "pickup_only", "distance_km", "near"):
             fresh[field] = row[field]
         if fresh["pickup_only"]:
@@ -363,14 +305,13 @@ class Watcher:
             """,
             (now, self.REMIND_BEFORE + self.REMIND_LEAD, now),
         )
-        plz = (settings.get("plz") or "").strip()
         for row in rows:
             key = (row["search_id"], row["item_id"])
             db.ex("UPDATE items SET reminded = 1 WHERE search_id = ? AND item_id = ?", key)   # nur ein Versuch
             s = db.q1("SELECT * FROM searches WHERE id = ?", (row["search_id"],))
             try:
-                item = await self._fresh_item(row, plz, "erinnerung")
-            except EbayError as e:
+                item = await self._fresh_item(row, settings, "erinnerung")
+            except PlatformError as e:
                 log.warning("Erinnerung %s: %s", row["item_id"], e)
                 item = row   # lieber mit dem letzten bekannten Preis erinnern als gar nicht
             if item is None or not notify.configured(settings):
@@ -410,7 +351,8 @@ class Watcher:
             "image": self._image(settings, s, v),
             "priority": 5,
             "tags": ["rotating_light", "alarm_clock"],
-            "actions": [{"action": "view", "label": "Jetzt bei eBay bieten", "url": v["url"], "clear": True}],
+            "actions": [{"action": "view", "label": f"Jetzt bei {plattformen.of_item(v).name} bieten",
+                         "url": v["url"], "clear": True}],
         }
 
     # ------------------------------------------------------------ Durchschnittspreis
@@ -423,14 +365,14 @@ class Watcher:
             return
         self._market_next = time.time() + MARKET_EVERY
         market.prune()
-        plz = (settings.get("plz") or "").strip()
         searches = db.q("SELECT * FROM searches WHERE active = 1 AND last_run IS NOT NULL ORDER BY id")
+        searches = [s for s in searches if self._market_platform(s, settings)]
 
         for s in searches:   # höchstens eine Gesuch-Suche pro Durchgang, nur wenn es Angebote gibt
             key = market.search_key(s["id"])
             has_items = db.q1("SELECT 1 AS x FROM items WHERE search_id = ? AND status = 'active' LIMIT 1", (s["id"],))
             if has_items and market.due(key):
-                await self._fetch_market(key, s["query"], self._market_filters(s), plz, s["exclude"])
+                await self._fetch_market(self._market_platform(s, settings), key, settings, s["exclude"], s=s)
                 return
 
         now = time.time()
@@ -453,41 +395,31 @@ class Watcher:
 
         budget = min(MARKET_LOOKUPS_PER_RUN, market.daily_lookups(settings) - market.lookups_today())
         for key, (_prio, _end, s, v) in sorted(wanted.items(), key=lambda w: w[1][:2])[:max(0, budget)]:
+            p = self._market_platform(s, settings)
             if key.startswith("epid:"):
-                await self._fetch_market(key, None, self._lookup_filters(), plz, extra={"epid": key[5:]})
+                await self._fetch_market(p, key, settings, catalog=key[5:])
             else:
                 brand = (s["query"].split() or [""])[0]
                 number = market.raw_number(v["title"], key[3:])
-                await self._fetch_market(key, f"{brand} {number}".strip(), self._lookup_filters(), plz)
+                await self._fetch_market(p, key, settings, query=f"{brand} {number}".strip())
 
-    async def _fetch_market(self, key: str, q: str | None, filters: list[str], plz: str,
-                            exclude: str = "", extra: dict | None = None) -> None:
+    @staticmethod
+    def _market_platform(s: dict, settings: dict) -> Plattform | None:
+        """Woher die Vergleichsangebote eines Gesuchs kommen: von seiner ersten eingerichteten Plattform."""
+        return next((p for p in plattformen.of_search(s) if p.configured(settings)), None)
+
+    async def _fetch_market(self, p: Plattform, key: str, settings: dict, exclude: str = "", s: dict | None = None,
+                            query: str | None = None, catalog: str | None = None) -> None:
         try:
-            summaries = await self.ebay.search(q, filters, None, plz, max_pages=1, extra=extra,
-                                               purpose="durchschnitt")
-        except EbayError as e:
+            listings, complete = await p.compare(settings, s=s, query=query, catalog=catalog)
+        except PlatformError as e:
             log.info("Durchschnittspreis %s: %s", key, e)
             market.store(key, None)
             return
-        complete = len(summaries) < market.PAGE_SIZE   # vor dem Filtern: hat eBay alles geliefert?
         excluded = util.exclusion_words(exclude)
         if excluded:
-            summaries = [x for x in summaries if not any(w in (x.get("title") or "").lower() for w in excluded)]
-        market.store(key, summaries, complete=complete)
-
-    def _market_filters(self, s: dict) -> list[str]:
-        """Wie die Suche des Gesuchs, aber nur Sofortkauf und ohne Höchstpreis."""
-        filters = ["priceCurrency:EUR", "buyingOptions:{FIXED_PRICE}", "deliveryCountry:DE", self._location_filter(s)]
-        if s["condition"] == "new":
-            filters.append("conditions:{NEW}")
-        elif s["condition"] == "used":
-            filters.append("conditions:{USED}")
-        return filters
-
-    @staticmethod
-    def _lookup_filters() -> list[str]:
-        """Gezielte Abfragen gelten für alle Gesuche: Sofortkauf aus Deutschland, jeder Zustand."""
-        return ["priceCurrency:EUR", "buyingOptions:{FIXED_PRICE}", "deliveryCountry:DE", "itemLocationCountry:DE"]
+            listings = [x for x in listings if not any(w in (x.get("title") or "").lower() for w in excluded)]
+        market.store(key, listings, complete=complete)
 
     # ------------------------------------------------------------ Nachrichten
 
@@ -531,16 +463,17 @@ class Watcher:
 
     def _image(self, settings: dict, s: dict, v: dict) -> str | None:
         """Bild für die Benachrichtigung: aus dem eigenen Bild-Cache, wenn die Adresse von
-        Heuhaufen eingetragen ist (das Handy muss sie erreichen), sonst direkt von eBay."""
+        Heuhaufen eingetragen ist (das Handy muss sie erreichen), sonst direkt von der Plattform."""
         base = self._app_base(settings)
         path = images.url(s["id"], v["item_id"], v["image"])
         if base and path:
             return base + path
-        return util.large_image(v["image"])
+        return plattformen.of_item(v).image(v["image"], images.THUMB_SIZE)
 
     def _actions(self, settings: dict, s: dict, v: dict, remind: bool = False) -> list[dict]:
         """Knöpfe der Benachrichtigung (ntfy erlaubt höchstens drei)."""
-        actions = [{"action": "view", "label": "Bei eBay öffnen", "url": v["url"], "clear": True}]
+        actions = [{"action": "view", "label": f"Bei {plattformen.of_item(v).name} öffnen", "url": v["url"],
+                    "clear": True}]
         remind_url = self._remind_url(settings, s, v) if remind else None
         if remind_url:   # das Handy schickt den POST an Heuhaufen, dafür muss es die Adresse erreichen
             actions.append({"action": "http", "label": "1 Min vorher erinnern", "url": remind_url,
@@ -567,7 +500,7 @@ class Watcher:
 
     @staticmethod
     def _condition_line(v: dict) -> list[str]:
-        """z. B. „Zustand: Gebraucht“ (eBay-Wortlaut, ohne Zusatz in Klammern)."""
+        """z. B. „Zustand: Gebraucht“ (Wortlaut der Plattform, ohne Zusatz in Klammern)."""
         label = util.condition_label(v)
         return [f"Zustand: {label}"] if label else []
 
@@ -636,9 +569,15 @@ class Watcher:
 
     # ------------------------------------------------------------ Einstellungen
 
-    async def test_ebay(self) -> None:
+    async def check_platform(self, key: str) -> None:
+        """Einstellungen → „Verbindung prüfen“."""
+        p = plattformen.get(key)
         try:
-            limits = await self.ebay.rate_limits()
-            self.last_ebay_check = {"ok": True, "at": time.time(), **limits}
-        except EbayError as e:
-            self.last_ebay_check = {"ok": False, "at": time.time(), "error": str(e)}
+            limits = await p.check(db.get_settings())
+            self.last_checks[p.key] = {"ok": True, "at": time.time(), **limits}
+        except PlatformError as e:
+            self.last_checks[p.key] = {"ok": False, "at": time.time(), "error": str(e)}
+        except Exception as e:   # unerwartete Antwort: anzeigen statt die Einstellungen abstürzen zu lassen
+            log.exception("Verbindung prüfen (%s)", p.name)
+            self.last_checks[p.key] = {"ok": False, "at": time.time(),
+                                       "error": f"Prüfung fehlgeschlagen ({e.__class__.__name__})."}

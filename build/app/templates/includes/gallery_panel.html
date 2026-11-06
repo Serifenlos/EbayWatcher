@@ -44,7 +44,7 @@
         {% if v.auction and v.end_time %}<p>Endet in {{ ui.countdown_span(v.end_time, now) }}</p>{% endif %}
         {% if v.auction and d and d.min_bid and not gone %}<p>Nächstes Gebot ab {{ eur(d.min_bid) }}</p>{% endif %}
         {% if v.auction and d and d.reserve_met == 0 %}<p class="font-medium text-tight">Mindestpreis noch nicht erreicht</p>{% endif %}
-        {% if gone %}<p class="font-medium text-over">Dieses Angebot ist bei eBay nicht mehr verfügbar.</p>{% endif %}
+        {% if gone %}<p class="font-medium text-over">Dieses Angebot ist bei {{ v.platform_name }} nicht mehr verfügbar.</p>{% endif %}
       </div>
     </div>
 
@@ -84,13 +84,13 @@
           {% else %}<p>{{ b.text }}</p>{% endif %}
           {% endfor %}
         </div>
-        {% if d.truncated %}<p class="text-meta text-muted">Gekürzt, die ganze Beschreibung steht bei eBay.</p>{% endif %}
+        {% if d.truncated %}<p class="text-meta text-muted">Gekürzt, die ganze Beschreibung steht bei {{ v.platform_name }}.</p>{% endif %}
         {% elif d %}
         <p class="text-meta text-muted">Der Verkäufer hat keine Beschreibung als Text hinterlegt, vielleicht nur Bilder.</p>
         {% else %}
         <p class="text-meta text-muted">Die Beschreibung ist gerade nicht verfügbar.</p>
         {% endif %}
-        {% if v.url %}<p class="text-ui"><a href="{{ v.url }}" target="_blank" rel="noopener noreferrer">{{ 'Ganze Beschreibung bei eBay' if d and d.description else 'Angebot bei eBay öffnen' }} ↗</a></p>{% endif %}
+        {% if v.url %}<p class="text-ui"><a href="{{ v.url }}" target="_blank" rel="noopener noreferrer">{{ 'Ganze Beschreibung bei ' ~ v.platform_name if d and d.description else 'Angebot bei ' ~ v.platform_name ~ ' öffnen' }} ↗</a></p>{% endif %}
       </section>
     </div>
   </div>

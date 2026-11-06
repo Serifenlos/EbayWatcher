@@ -10,9 +10,9 @@ DB_PATH = DATA_DIR / "heuhaufen.db"
 # davon im Datenordner, übernimmt db.init() sie unter dem neuen Namen.
 LEGACY_DB_NAMES = ("ebay-watcher.db",)
 
-# eBay Production-Keyset: App ID (Client ID) und Cert ID (Client Secret)
-EBAY_CLIENT_ID = os.environ.get("EBAY_CLIENT_ID", "").strip()
-EBAY_CLIENT_SECRET = os.environ.get("EBAY_CLIENT_SECRET", "").strip()
+# eBay: Marktplatz (Vorgabe eBay.de). Die Zugangsdaten stehen seit Heuhaufen 0.3 in den Einstellungen;
+# EBAY_CLIENT_ID und EBAY_CLIENT_SECRET aus der Docker-Konfiguration werden beim Start einmal übernommen
+# (plattformen/liste.adopt_from_environment).
 EBAY_MARKETPLACE = os.environ.get("EBAY_MARKETPLACE", "EBAY_DE").strip()
 
 # Erstes Benutzerkonto, wird nur beim allerersten Start angelegt

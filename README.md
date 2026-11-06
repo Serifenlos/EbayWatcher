@@ -27,21 +27,22 @@ So arbeitet Heuhaufen: Es sucht im eingestellten Intervall (Standard 15 Minuten,
 ## Voraussetzungen
 
 - **Docker mit Docker Compose**, direkt oder über Portainer. Das Image gibt es für x86-64 (`linux/amd64`), nicht für ARM-Geräte wie den Raspberry Pi.
-- **Ein Konto im [eBay Developer Program](https://developer.ebay.com)** mit einem *Production*-Keyset. Daraus brauchst du die **App ID** und die **Cert ID**. Heuhaufen liest nur öffentliche Suchergebnisse; ein Login mit deinem eBay-Konto ist nicht nötig.
+- **Ein Konto im [eBay Developer Program](https://developer.ebay.com)** mit einem *Production*-Keyset. Daraus brauchst du die **App ID** und die **Cert ID**; du trägst sie nach dem ersten Login in den Einstellungen ein. Heuhaufen liest nur öffentliche Suchergebnisse; ein Login mit deinem eBay-Konto ist nicht nötig.
 - **Ein ntfy-Server und die ntfy-App** auf dem Handy. Das kann eine eigene Instanz sein oder der öffentliche Server `https://ntfy.sh`.
 - Heuhaufen ist auf **eBay.de** ausgelegt: Lieferung nach Deutschland, deutsche Postleitzahlen, Preise in Euro.
 
 ## Installation
+
+Alle Werte stehen direkt in der Compose-Datei [`docker/docker-compose.yml`](docker/docker-compose.yml). Ersetze darin das Passwort für den ersten Login, bei Bedarf `PUID`/`PGID` und den Datenordner.
 
 ### Mit Docker Compose
 
 ```bash
 mkdir heuhaufen && cd heuhaufen
 curl -O https://raw.githubusercontent.com/Serifenlos/Heuhaufen/main/docker/docker-compose.yml
-curl -o .env https://raw.githubusercontent.com/Serifenlos/Heuhaufen/main/docker/.env.example
 ```
 
-In der Datei `.env` mindestens `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET` und `ADMIN_PASSWORD` eintragen, dann starten:
+Die Datei öffnen, die Werte eintragen und starten:
 
 ```bash
 docker compose up -d
@@ -53,18 +54,11 @@ Die Datenbank liegt danach im Ordner `data` neben der Compose-Datei.
 
 1. Einen Ordner für die Daten anlegen, zum Beispiel `/volume1/docker/heuhaufen` auf einer Synology.
 2. **Stacks → Add stack**, Name `heuhaufen`, **Web editor**.
-3. Den Inhalt von [`docker/docker-compose.yml`](docker/docker-compose.yml) einfügen.
-4. Darunter bei **Environment variables** eintragen:
-
-   | Name | Wert |
-   | --- | --- |
-   | `EBAY_CLIENT_ID` | App ID (Production) |
-   | `EBAY_CLIENT_SECRET` | Cert ID (Production) |
-   | `ADMIN_PASSWORD` | Passwort für den ersten Login, mindestens 10 Zeichen |
-   | `DATA_PATH` | der Datenordner aus Schritt 1 |
-
-   Optional außerdem `ADMIN_USER` (Standard `admin`) sowie `PUID` und `PGID`, siehe [Umgebungsvariablen](#umgebungsvariablen).
-5. **Deploy the stack.**
+3. Den Inhalt von [`docker/docker-compose.yml`](docker/docker-compose.yml) einfügen und darin eintragen:
+   - bei `ADMIN_PASSWORD` das Passwort für den ersten Login (mindestens 10 Zeichen),
+   - bei `PUID` und `PGID` die Werte für deinen Datenordner (Synology meist `1026` und `100`),
+   - bei `volumes` links statt `./data` den Ordner aus Schritt 1, also `/volume1/docker/heuhaufen:/data`.
+4. **Deploy the stack.**
 
 Ist Port 8765 schon belegt, in der Compose-Datei bei `8765:8000` die linke Zahl ändern.
 
@@ -72,9 +66,9 @@ Ist Port 8765 schon belegt, in der Compose-Datei bei `8765:8000` die linke Zahl 
 
 1. `http://ADRESSE-DEINES-SERVERS:8765` öffnen und mit `ADMIN_USER` und `ADMIN_PASSWORD` anmelden.
 2. Unter **Einstellungen**:
+   - unter **eBay-Verbindung** App ID und Cert ID eintragen und speichern; Heuhaufen prüft die Verbindung gleich
    - Postleitzahl und Umkreis für Abholung eintragen
    - ntfy-Adresse, Topic und gegebenenfalls Access-Token eintragen und **Testnachricht senden**
-   - unter **eBay-Verbindung** auf **Verbindung prüfen** tippen
 3. Das erste Gesuch anlegen.
 
 `ADMIN_PASSWORD` wird nur beim allerersten Start verwendet. Später änderst du das Passwort in den Einstellungen.
@@ -102,13 +96,13 @@ Welche Version du bekommst, legst du über den Image-Tag in der Compose-Datei fe
 
 ### Umstieg von „Ebay Watcher“
 
-Bis November 2026 hieß Heuhaufen „Ebay Watcher“ (Image `ghcr.io/serifenlos/ebaywatcher`). Beim ersten Start übernimmt Heuhaufen die alte Datenbank `ebay-watcher.db` aus dem Datenordner unter dem neuen Namen `heuhaufen.db`, mit allen Gesuchen, Einstellungen, Durchschnittspreisen und Anmeldungen. Du bleibst angemeldet.
+Bis November 2026 hieß Heuhaufen „Ebay Watcher“ (Image `ghcr.io/serifenlos/ebaywatcher`). Beim ersten Start übernimmt Heuhaufen die alte Datenbank `ebay-watcher.db` aus dem Datenordner unter dem neuen Namen `heuhaufen.db`, mit allen Gesuchen, Einstellungen, Durchschnittspreisen und Anmeldungen. Du bleibst angemeldet. Stehen in der alten Compose-Datei noch `EBAY_CLIENT_ID` und `EBAY_CLIENT_SECRET`, übernimmt Heuhaufen sie einmal in die Einstellungen; danach kannst du die beiden Zeilen löschen.
 
 1. Den alten Container stoppen und den Datenordner sichern (einfach kopieren).
-2. In der Compose-Datei das Image auf `ghcr.io/serifenlos/heuhaufen:latest` ändern (neue Vorlage: [`docker/docker-compose.yml`](docker/docker-compose.yml)). Wichtig: derselbe Datenordner wie bisher, also dasselbe `DATA_PATH`. Wer den Ordner umbenennen möchte, macht das, solange der Container gestoppt ist, und trägt den neuen Pfad ein.
+2. In der Compose-Datei das Image auf `ghcr.io/serifenlos/heuhaufen:latest` ändern (neue Vorlage: [`docker/docker-compose.yml`](docker/docker-compose.yml)). Wichtig: derselbe Datenordner wie bisher (links bei `volumes`). Wer den Ordner umbenennen möchte, macht das, solange der Container gestoppt ist, und trägt den neuen Pfad ein.
 3. Starten. Im Container-Log steht einmal „Datenbank ebay-watcher.db übernommen als heuhaufen.db“.
 
-In Portainer am einfachsten: den alten Stack stoppen, einen neuen Stack `heuhaufen` mit der neuen Compose-Datei und denselben Umgebungsvariablen anlegen, prüfen, ob alles da ist, und erst dann den alten Stack löschen. Der Datenordner bleibt dabei erhalten, weil er auf dem Server liegt und nicht im Stack. Alter und neuer Container dürfen nie gleichzeitig laufen.
+In Portainer am einfachsten: den alten Stack stoppen, einen neuen Stack `heuhaufen` mit der neuen Compose-Datei und deinen Werten anlegen, prüfen, ob alles da ist, und erst dann den alten Stack löschen. Der Datenordner bleibt dabei erhalten, weil er auf dem Server liegt und nicht im Stack. Alter und neuer Container dürfen nie gleichzeitig laufen.
 
 ## Sicherheit und HTTPS
 
@@ -120,21 +114,21 @@ Bei einem öffentlichen ntfy-Server wie `ntfy.sh` kann jeder mitlesen, der den T
 
 ## Passwort vergessen
 
-`ADMIN_PASSWORD` auf ein neues Passwort setzen (mindestens 10 Zeichen), zusätzlich `ADMIN_RESET=true` setzen und den Container neu starten (`docker compose up -d` bzw. in Portainer **Update the stack**). Beim Start wird das Passwort zurückgesetzt, die Zwei-Faktor-Anmeldung ausgeschaltet und alle Geräte werden abgemeldet. Danach `ADMIN_RESET` wieder entfernen.
+In der Compose-Datei `ADMIN_PASSWORD` auf ein neues Passwort setzen (mindestens 10 Zeichen), die Zeile `ADMIN_RESET: "true"` einkommentieren und den Container neu starten (`docker compose up -d` bzw. in Portainer **Update the stack**). Beim Start wird das Passwort zurückgesetzt, die Zwei-Faktor-Anmeldung ausgeschaltet und alle Geräte werden abgemeldet. Danach `ADMIN_RESET` wieder entfernen.
 
 ## Umgebungsvariablen
 
 | Variable | Standard | Bedeutung |
 | --- | --- | --- |
-| `EBAY_CLIENT_ID` | – | App ID (Production) |
-| `EBAY_CLIENT_SECRET` | – | Cert ID (Production) |
 | `ADMIN_USER` | `admin` | Benutzername beim ersten Start |
 | `ADMIN_PASSWORD` | zufällig | Passwort beim ersten Start; fehlt es, steht ein zufälliges im Container-Log |
 | `ADMIN_RESET` | – | `true` setzt beim Start das Passwort auf `ADMIN_PASSWORD` zurück und schaltet 2FA ab |
-| `DATA_PATH` | `./data` | Ordner auf dem Server für die Datenbank (nur in der Compose-Datei) |
 | `PUID` / `PGID` | `1000` | Benutzer und Gruppe, denen der Datenordner gehört. Auf Synology meist `1026` und `100`; per SSH zeigt `id` deine Werte |
 | `TZ` | `Europe/Berlin` | Zeitzone für die Anzeige |
 | `COOKIE_SECURE` | `auto` | `true` erzwingt Secure-Cookies, `auto` setzt sie nur bei HTTPS |
+| `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` | – | nicht mehr nötig: Die eBay-Zugangsdaten stehen in den Einstellungen. Sind sie hier noch gesetzt, übernimmt Heuhaufen sie beim Start einmal dorthin |
+
+Den Datenordner legst du in der Compose-Datei bei `volumes` fest (links der Ordner auf dem Server).
 
 ## Gut zu wissen
 
@@ -142,6 +136,7 @@ Bei einem öffentlichen ntfy-Server wie `ntfy.sh` kann jeder mitlesen, der den T
 - **Durchschnittspreis:** Verkaufte Preise gibt die eBay-API nicht heraus. Der Ø ist deshalb der Median der Sofortkauf-Angebote desselben Produkts, also ein Angebotspreis. Heuhaufen merkt sich die Angebote, die es dabei sieht, und zählt alle, die im eingestellten Zeitraum (Vorgabe 6 Monate) zu sehen waren, jedes nur einmal. So wächst der Vergleich mit der Zeit, ohne zusätzliche Abfragen. Angebote, die vor ihrem Ende verschwinden, weist Heuhaufen als vermutlich verkauft aus. Als dasselbe Produkt gelten Angebote mit gleicher eBay-Katalognummer, gleicher Artikelnummer im Titel (etwa `87 01 250` oder `576982`) oder gleichem Modell und ähnlichem Titel (etwa „1220E“, aber nicht „1260E + 1220E“), und zwar nur mit derselben Stückzahl: ein „2er Set“ wird nicht mit Einzelgeräten verglichen. Gibt es weniger als drei Vergleichsangebote oder liegen ihre Preise beim Titelvergleich weit auseinander, steht kein Ø da. Dafür braucht Heuhaufen pro Gesuch eine Abfrage am Tag und für Angebote mit Artikel- oder Katalognummer gezielte Abfragen, deren Zahl pro Tag du unter *Einstellungen → Durchschnittspreis* begrenzt.
 - **Knöpfe in der Benachrichtigung:** „1 Min vorher erinnern“ erscheint nur, wenn unter *Einstellungen → Standort und Suche* die **Adresse von Heuhaufen** eingetragen ist. Beim Tippen schickt das Handy eine Anfrage an diese Adresse, es muss sie also erreichen können.
 - **Bilder:** Jedes Artikelbild lädt Heuhaufen nur einmal bei eBay und speichert es im Datenordner unter `cache/bilder`, für die Galerie in großer Auflösung beim ersten Öffnen. Das kostet keine API-Abfragen, die Bildadressen kommen schon mit der Suche. Bilder, die 14 Tage nicht angezeigt wurden, löscht es von selbst, und insgesamt belegt der Ordner höchstens etwa 500 MB. Ist unter *Einstellungen → Standort und Suche* die **Adresse von Heuhaufen** eingetragen, kommen auch die Bilder in den Benachrichtigungen aus diesem Cache. Das Handy muss diese Adresse dann erreichen können, sonst fehlt das Bild in der Benachrichtigung.
+- **Zugangsdaten und Backup:** Die Cert ID speichert Heuhaufen verschlüsselt in der Datenbank. Der Schlüssel liegt daneben im Datenordner in der Datei `geheim.key`. Sichere immer den ganzen Datenordner; ohne `geheim.key` musst du die Cert ID neu eintragen.
 - **Datenschutz:** Heuhaufen speichert nur Artikelnummer, Titel, Artikelbilder, Zustand, Preise, Versandkosten, Standort-Land und Endzeit der gefundenen Angebote, für die Galerie außerdem Beschreibung, Artikelmerkmale und die Zahl der Gebote und Bieter. Daten über Verkäufer oder Käufer werden nicht gespeichert. Beendete Angebote werden nach sieben Tagen gelöscht.
 
 ## Fremdsoftware

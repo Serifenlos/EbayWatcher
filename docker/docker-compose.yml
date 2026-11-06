@@ -1,26 +1,27 @@
 # Heuhaufen – Docker Compose
 #
-# Docker Compose: Werte in die Datei .env daneben schreiben (Vorlage: .env.example), dann "docker compose up -d".
-# Portainer: Stacks > Add stack > Web editor, diesen Inhalt einfügen und die Werte unter
-#            "Environment variables" eintragen.
-# Pflicht sind EBAY_CLIENT_ID, EBAY_CLIENT_SECRET und ADMIN_PASSWORD, alles andere hat Standardwerte.
+# Die Werte stehen direkt in dieser Datei. Ersetze die Stellen in GROSSBUCHSTABEN, dann:
+#   Docker Compose: neben dieser Datei "docker compose up -d"
+#   Portainer:      Stacks > Add stack > Web editor, diesen Inhalt einfügen, "Deploy the stack"
+# Die eBay-Zugangsdaten (App ID und Cert ID) trägst du nach dem ersten Login unter
+# Einstellungen > eBay-Verbindung ein.
 services:
   heuhaufen:
     image: ghcr.io/serifenlos/heuhaufen:latest
     container_name: heuhaufen
     restart: unless-stopped
     ports:
-      - "8765:8000"
+      - "8765:8000"                    # links der Port im Heimnetz, bei Bedarf ändern
     environment:
-      EBAY_CLIENT_ID: ${EBAY_CLIENT_ID}
-      EBAY_CLIENT_SECRET: ${EBAY_CLIENT_SECRET}
-      ADMIN_USER: ${ADMIN_USER:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      ADMIN_RESET: ${ADMIN_RESET:-}
-      TZ: ${TZ:-Europe/Berlin}
-      COOKIE_SECURE: ${COOKIE_SECURE:-auto}
-      # Benutzer und Gruppe für den Datenordner (Synology: meist 1026 und 100, per SSH mit "id" prüfen)
-      PUID: ${PUID:-1000}
-      PGID: ${PGID:-1000}
+      ADMIN_USER: "admin"
+      ADMIN_PASSWORD: "PASSWORT-FUER-DEN-ERSTEN-LOGIN"   # mindestens 10 Zeichen, gilt nur beim allerersten Start
+      TZ: "Europe/Berlin"
+      COOKIE_SECURE: "auto"
+      # Besitzer des Datenordners (Synology: meist 1026 und 100, per SSH mit "id" prüfen)
+      PUID: "1000"
+      PGID: "1000"
+      # Notfall: Passwort auf ADMIN_PASSWORD zurücksetzen und 2FA ausschalten. Danach wieder auskommentieren.
+      # ADMIN_RESET: "true"
     volumes:
-      - ${DATA_PATH:-./data}:/data
+      # links der Datenordner auf dem Server (z. B. /volume1/docker/heuhaufen), rechts nicht ändern
+      - ./data:/data

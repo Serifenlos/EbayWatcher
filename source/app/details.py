@@ -1,11 +1,12 @@
-"""Angaben zu einem Angebot, die nur die Einzelabfrage getItem liefert: Beschreibung des Verkäufers,
-Zustandsbeschreibung, Artikelmerkmale und der Stand der Gebote. Die Galerie zeigt sie in der Seitenleiste.
+"""Angaben zu einem Angebot, die nur die Einzelabfrage liefert (bei eBay getItem): Beschreibung des
+Verkäufers, Zustandsbeschreibung, Artikelmerkmale und der Stand der Gebote. Die Galerie zeigt sie in der
+Seitenleiste. Die Plattform liefert sie in der gemeinsamen Form (plattformen/basis.DETAIL_FIELDS).
 
 * Gespeichert wird bei jeder Einzelabfrage, auch bei Endspurt und Erinnerung (dann ohne zusätzliche
   Abfrage). Öffnet man die Galerie, fragt Heuhaufen nur nach, wenn der Stand älter als MAX_AGE ist.
 * Die Beschreibung ist HTML von fremden Verkäufern. Gespeichert und angezeigt wird nur bereinigter Text:
   Absätze, Listenpunkte und Zwischenüberschriften, ohne Bilder, Links, Stile und Skripte. Sehr lange
-  Beschreibungen werden gekürzt, die ganze steht bei eBay.
+  Beschreibungen werden gekürzt, die ganze steht bei der Plattform.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from html.parser import HTMLParser
 
 from . import db
 
-MAX_AGE = 600              # Galerie: höchstens alle 10 Minuten neu bei eBay nachfragen
+MAX_AGE = 600              # Galerie: höchstens alle 10 Minuten neu bei der Plattform nachfragen
 MAX_CHARS = 4000           # so viel Beschreibung zeigt die Seitenleiste höchstens …
 MAX_BLOCKS = 60            # … in höchstens so vielen Absätzen
 MAX_ASPECTS = 12
@@ -104,31 +105,24 @@ def text_blocks(html: str | None) -> tuple[list[dict], bool]:
     return blocks, truncated
 
 
-def _money(obj: dict | None) -> float | None:
-    try:
-        return float((obj or {}).get("value"))
-    except (TypeError, ValueError):
-        return None
-
-
-def from_item(detail: dict) -> dict:
-    """Was aus einer getItem-Antwort gespeichert wird."""
-    blocks, truncated = text_blocks(detail.get("description"))
+def from_item(info: dict) -> dict:
+    """Was gespeichert wird, aus den Angaben der Plattform (plattformen/basis.DETAIL_FIELDS)."""
+    blocks, truncated = text_blocks(info.get("description_html"))
     aspects = []
-    for a in detail.get("localizedAspects") or []:
-        name, value = (a.get("name") or "").strip(), (a.get("value") or "").strip()
+    for name, value in info.get("aspects") or []:
+        name, value = (name or "").strip(), (value or "").strip()
         if name and value and len(value) <= 120:
             aspects.append([name, value])
         if len(aspects) >= MAX_ASPECTS:
             break
-    note = re.sub(r"\s+", " ", detail.get("conditionDescription") or "").strip()
-    reserve = detail.get("reservePriceMet")
+    note = re.sub(r"\s+", " ", info.get("condition_note") or "").strip()
+    reserve = info.get("reserve_met")
     return {
         "description": blocks, "truncated": truncated,
         "condition_note": note[:MAX_NOTE] or None,
         "aspects": aspects,
-        "bidders": detail.get("uniqueBidderCount"),
-        "min_bid": _money(detail.get("minimumPriceToBid")),
+        "bidders": info.get("bidders"),
+        "min_bid": info.get("min_bid"),
         "reserve_met": None if reserve is None else int(bool(reserve)),
     }
 
@@ -160,6 +154,6 @@ def load(item_id: str) -> dict | None:
 
 
 def due(item_id: str, now: float | None = None) -> bool:
-    """Galerie: bei eBay nachfragen? Ja, wenn noch nichts da ist oder der Stand älter als MAX_AGE ist."""
+    """Galerie: bei der Plattform nachfragen? Ja, wenn noch nichts da ist oder der Stand älter als MAX_AGE ist."""
     row = db.q1("SELECT fetched_at FROM item_details WHERE item_id = ?", (item_id,))
     return not row or (now or time.time()) - row["fetched_at"] > MAX_AGE

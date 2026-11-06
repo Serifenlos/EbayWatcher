@@ -49,19 +49,19 @@
       "oAP" : "\/build\/docker",
       "oF" : 0
     },
-    "\/EbayWatcher.code-workspace" : {
+    "\/Heuhaufen.code-workspace" : {
       "cB" : 0,
       "ft" : 8192,
       "hM" : 0,
       "oA" : 1,
-      "oAP" : "\/build\/EbayWatcher.code-workspace",
+      "oAP" : "\/build\/Heuhaufen.code-workspace",
       "oF" : 1
     },
     "\/node_modules" : {
       "ft" : 65536,
       "oA" : 1,
       "oAP" : "\/build\/node_modules",
-      "oF" : 1
+      "oF" : 0
     },
     "\/package-lock.json" : {
       "ft" : 524288,
@@ -163,12 +163,12 @@
       "oAP" : "\/build\/app\/details.py",
       "oF" : 1
     },
-    "\/source\/app\/ebay.py" : {
+    "\/source\/app\/geheim.py" : {
       "cB" : 0,
       "ft" : 8192,
       "hM" : 0,
       "oA" : 2,
-      "oAP" : "\/build\/app\/ebay.py",
+      "oAP" : "\/build\/app\/geheim.py",
       "oF" : 1
     },
     "\/source\/app\/images.py" : {
@@ -201,6 +201,30 @@
       "hM" : 0,
       "oA" : 2,
       "oAP" : "\/build\/app\/notify.py",
+      "oF" : 1
+    },
+    "\/source\/app\/plattformen\/basis.py" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 2,
+      "oAP" : "\/build\/app\/plattformen\/basis.py",
+      "oF" : 1
+    },
+    "\/source\/app\/plattformen\/ebay.py" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 2,
+      "oAP" : "\/build\/app\/plattformen\/ebay.py",
+      "oF" : 1
+    },
+    "\/source\/app\/plattformen\/liste.py" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 2,
+      "oAP" : "\/build\/app\/plattformen\/liste.py",
       "oF" : 1
     },
     "\/source\/app\/signed.py" : {
@@ -397,11 +421,11 @@
   },
   "projectAttributes" : {
     "creationDate" : 814350063.28089797,
-    "displayValue" : "EbayWatcher",
+    "displayValue" : "Heuhaufen",
     "displayValueWasSetByUser" : 0,
     "iconImageName" : "brackets-pale",
     "iconImageWasSetByUser" : 0,
-    "lastBuiltDate" : 815645465.29433405
+    "lastBuiltDate" : 815698796.59238803
   },
   "projectSettings" : {
     "abortBuildOnError" : 1,
