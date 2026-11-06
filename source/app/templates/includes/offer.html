@@ -1,6 +1,7 @@
 {#
   Ein Angebot in einer Liste auf der Detailseite.
   Erwartet: v (Angebot), sid (Gesuch), kind ("matches", "over" oder "hidden"), csrf, now
+  Vorschaubild und Titel öffnen die Galerie (data-gallery). Die Galerie blendet über form[data-hide] aus.
   Die data-sort-…-Attribute nutzt das Sortieren im Browser (app.js).
   v.market: Durchschnittspreis aus market.py (fehlt, wenn es nicht genug Vergleich gibt).
 #}
@@ -24,9 +25,10 @@
     {% else %}
     <span class="grid aspect-square place-items-center overflow-hidden rounded-thumb bg-tile"></span>
     {% endif %}
-    {# Titel und Preis: direkt zum Angebot bei eBay #}
+    {# Titel und Preis: öffnen ebenfalls die Galerie mit Beschreibung (app.js). Mit gedrückter Befehls-/Strg-Taste
+       oder ohne JavaScript geht es direkt zum Angebot bei eBay. #}
     <a class="group/offer grid min-w-0 items-start gap-x-5 gap-y-2 text-inherit no-underline md:grid-cols-[minmax(0,1fr)_minmax(170px,230px)] md:items-center"
-       href="{{ v.url }}" target="_blank" rel="noopener noreferrer">
+       href="{{ v.url }}" target="_blank" rel="noopener noreferrer" data-gallery="{{ gallery_url(v) }}">
       <span class="grid min-w-0 gap-0.75">
         <span class="line-clamp-2 leading-[1.35] font-medium group-hover/offer:underline group-hover/offer:decoration-1 group-hover/offer:underline-offset-3">{{ v.title }}</span>
         <span class="text-sm text-muted">{{ v.kind }}{% if v.auction %}, {{ v.bid_count or 0 }} {{ 'Gebot' if v.bid_count == 1 else 'Gebote' }}{% endif %}

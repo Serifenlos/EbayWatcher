@@ -302,36 +302,80 @@
   });
 
   // ------------------------------------------------------------------
-  // Ausblenden ohne Neuladen der Seite: Zeile entfernen und Zähler anpassen.
+  // Ausblenden ohne Neuladen der Seite: Zeile entfernen und Zähler anpassen, danach einige Sekunden
+  // „Rückgängig“ anbieten (search_detail.html, [data-undo]). Ausblenden geht auch in der Galerie.
   // Ohne JavaScript schickt das Formular ganz normal ab.
+
+  var UNDO_SECONDS = 10;
+  var undoTimer = null;
 
   function changeCount(name, delta) {
     var el = document.querySelector('[data-count="' + name + '"]');
     if (el) el.textContent = String(Math.max(0, Number(el.textContent) + delta));
   }
 
+  // Liste „Ausgeblendet“: Zähler anpassen, ohne Einträge verstecken, beim nächsten Aufklappen neu laden
+  function hiddenChanged(delta) {
+    var fold = document.getElementById("ausgeblendet");
+    if (!fold) return;
+    changeCount("hidden", delta);
+    var count = fold.querySelector('[data-count="hidden"]');
+    fold.hidden = !count || Number(count.textContent) === 0;
+    fold.removeAttribute("data-loaded");
+    if (fold.open && !fold.hidden) loadFold(fold);
+  }
+
+  function post(url, form) {
+    return fetch(url, { method: "POST", body: new FormData(form), credentials: "same-origin" })
+      .then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+      });
+  }
+
+  function offerUndo(form, row, ol, next, list) {
+    var box = document.querySelector("[data-undo]");
+    if (!box) return;
+    window.clearTimeout(undoTimer);
+    box.hidden = false;
+    box.querySelector("[data-undo-button]").onclick = function () {
+      window.clearTimeout(undoTimer);
+      box.hidden = true;
+      post(form.action.replace(/\/hide$/, "/unhide"), form)
+        .then(function () {
+          // Zeile an ihren alten Platz zurück und deren Seite zeigen
+          ol.insertBefore(row, next && next.parentNode === ol ? next : null);
+          var rows = Array.prototype.slice.call(ol.querySelectorAll(":scope > li[data-offer]"));
+          paginate(ol, Math.floor(rows.indexOf(row) / pageSize) + 1);
+          if (list) changeCount(list.dataset.list, 1);
+          hiddenChanged(-1);
+          tick();
+        })
+        .catch(function () { window.location.reload(); });
+    };
+    undoTimer = window.setTimeout(function () { box.hidden = true; }, UNDO_SECONDS * 1000);
+  }
+
+  function hideOffer(form) {
+    var row = form.closest("li");
+    var ol = row.parentElement;
+    var next = row.nextElementSibling;
+    var list = row.closest("[data-list]");
+    post(form.action, form)
+      .then(function () {
+        row.remove();
+        paginate(ol);
+        if (list) changeCount(list.dataset.list, -1);
+        hiddenChanged(1);
+        offerUndo(form, row, ol, next, list);
+      })
+      .catch(function () { form.submit(); });
+  }
+
   function bindHideForms(root) {
     root.querySelectorAll("form[data-hide]").forEach(function (form) {
       form.addEventListener("submit", function (event) {
         event.preventDefault();
-        var row = form.closest("li");
-        fetch(form.action, { method: "POST", body: new FormData(form), credentials: "same-origin" })
-          .then(function (response) {
-            if (!response.ok) throw new Error("HTTP " + response.status);
-            var list = row.closest("[data-list]");
-            var ol = row.parentElement;
-            row.remove();
-            paginate(ol);
-            if (list) changeCount(list.dataset.list, -1);
-            var hiddenFold = document.getElementById("ausgeblendet");
-            if (hiddenFold) {
-              hiddenFold.hidden = false;
-              changeCount("hidden", 1);
-              hiddenFold.removeAttribute("data-loaded");
-              if (hiddenFold.open) loadFold(hiddenFold);
-            }
-          })
-          .catch(function () { form.submit(); });
+        hideOffer(form);
       });
     });
   }
@@ -339,10 +383,11 @@
   bindHideForms(document);
 
   // ------------------------------------------------------------------
-  // Bilder-Galerie: Klick aufs Vorschaubild zeigt alle Bilder des Angebots (PhotoSwipe, photoswipe.com).
-  // /galerie/… liefert Adressen und Maße der Bilder aus dem Bild-Cache. PhotoSwipe selbst (js/photoswipe.js,
-  // gebündelt aus node_modules) lädt erst beim ersten Klick, die Adresse steht in <body data-photoswipe>.
-  // Ohne JavaScript führt das Bild zu eBay.
+  // Bilder-Galerie: Klick aufs Vorschaubild oder den Titel zeigt alle Bilder des Angebots (PhotoSwipe,
+  // photoswipe.com). /galerie/… liefert Adressen und Maße der Bilder aus dem Bild-Cache. PhotoSwipe selbst
+  // (js/photoswipe.js, gebündelt aus node_modules) lädt erst beim ersten Klick, die Adresse steht in
+  // <body data-photoswipe>. Ohne JavaScript oder mit Befehls-/Strg-Taste führen Bild und Titel zu eBay.
+  // In der Leiste oben: Ausblenden (wie das Auge in der Liste), Angaben ein/aus, bei eBay öffnen.
   // Seitenleiste (includes/gallery_panel.html, kommt fertig mit /galerie/…): beim Öffnen eingeblendet,
   // der Knopf ⓘ blendet sie aus und ein. Ab 64rem Breite steht sie rechts, darunter unten als Schublade.
 
@@ -361,6 +406,7 @@
   };
   // Knopf „Bei eBay öffnen“ oben in der Galerie (Pfeil aus dem Kasten, 32er-Raster wie die PhotoSwipe-Symbole)
   var EBAY_ICON = '<path id="pswp__icn-ebay" d="M9 11h6v2h-4v8h8v-4h2v6H9zM17 9h6v6h-2v-2.6l-5.3 5.3-1.4-1.4 5.3-5.3H17z"/>';
+  var HIDE_ICON = '<g id="pswp__icn-hide"><path fill-rule="evenodd" d="M5.5 16c2.4-4.2 6-6.3 10.5-6.3s8.1 2.1 10.5 6.3c-2.4 4.2-6 6.3-10.5 6.3S7.9 20.2 5.5 16zm2.4 0c2 3 4.7 4.4 8.1 4.4s6.1-1.4 8.1-4.4c-2-3-4.7-4.4-8.1-4.4S9.9 13 7.9 16z"/><circle cx="16" cy="16" r="2.6"/><path d="M8.2 6.8l17 17-1.4 1.4-17-17z"/></g>';
   var INFO_ICON = '<path id="pswp__icn-info" fill-rule="evenodd" d="M16 6.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19zm0 2a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15zM15 14h2v7h-2zm0-3.5h2v2h-2z"/>';
   var PANEL_WIDTH = 380;                                   // w-95 in gallery_panel.html
   var wideGallery = window.matchMedia("(min-width: 64rem)");   // lg: Leiste rechts statt unten
@@ -609,9 +655,13 @@
     });
   }
 
+  // Vorschaubild und Titel einer Zeile öffnen dieselbe Galerie (includes/offer.html)
   function openGallery(link) {
-    var thumb = link.querySelector("img");
-    link.setAttribute("aria-busy", "true");
+    var row = link.closest("li[data-offer]");
+    var links = row ? Array.prototype.slice.call(row.querySelectorAll("a[data-gallery]")) : [link];
+    var thumb = row ? row.querySelector("a[data-gallery] img") : link.querySelector("img");
+    var hideForm = row ? row.querySelector("form[data-hide]") : null;
+    links.forEach(function (a) { a.setAttribute("aria-busy", "true"); });
     window.Promise.all([loadPhotoSwipe(), loadImages(link)])
       .then(function (results) {
         var PhotoSwipe = results[0];
@@ -625,6 +675,21 @@
         var pswp = new PhotoSwipe(Object.assign({ dataSource: items }, GALLERY_OPTIONS));
         if (results[1].panel) addPanel(pswp, results[1].panel);
         pswp.on("uiRegister", function () {
+          if (hideForm) {
+            // Ausblenden: Galerie schließen, Zeile entfernen, unten „Rückgängig“ anbieten
+            pswp.ui.registerElement({
+              name: "hide",
+              order: 7,
+              isButton: true,
+              title: "Ausblenden",
+              ariaLabel: "Angebot ausblenden",
+              html: { isCustomSVG: true, inner: HIDE_ICON, outlineID: "pswp__icn-hide" },
+              onClick: function () {
+                pswp.close();
+                hideOffer(hideForm);
+              }
+            });
+          }
           pswp.ui.registerElement({
             name: "ebay",
             order: 9,
@@ -649,7 +714,7 @@
         if (tab) tab.opener = null;
         else window.location.assign(link.href);   // Pop-up gesperrt: dann eben in diesem Tab
       })
-      .then(function () { link.removeAttribute("aria-busy"); });
+      .then(function () { links.forEach(function (a) { a.removeAttribute("aria-busy"); }); });
   }
 
   document.addEventListener("click", function (event) {

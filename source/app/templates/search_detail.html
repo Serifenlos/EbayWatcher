@@ -13,12 +13,14 @@
       {% if s.active %}Aktiv, zuletzt gesucht {{ ago(s.last_run, now) }}{% else %}Pausiert{% endif %}
     </p>
   </div>
-  <div class="flex flex-wrap items-center gap-2.5">
-    <a class="{{ ui.button() }}" href="/searches/{{ s.id }}/edit">Bearbeiten</a>
+  {# Nur Symbole; der Name steht im Tooltip (title) und für Screenreader in aria-label #}
+  <div class="flex flex-wrap items-center gap-2">
+    <a class="{{ ui.tool_button() }}" href="/searches/{{ s.id }}/edit" title="Bearbeiten" aria-label="Gesuch bearbeiten">{{ ui.icon('pencil') }}</a>
     {% if s.active %}
-    <form method="post" action="/searches/{{ s.id }}/run">{{ ui.csrf_field(csrf) }}<button class="{{ ui.button() }}" type="submit">Jetzt suchen</button></form>
+    <form method="post" action="/searches/{{ s.id }}/run">{{ ui.csrf_field(csrf) }}<button class="{{ ui.tool_button() }}" type="submit" title="Jetzt suchen" aria-label="Jetzt suchen">{{ ui.icon('search') }}</button></form>
     {% endif %}
-    <form method="post" action="/searches/{{ s.id }}/toggle">{{ ui.csrf_field(csrf) }}<button class="{{ ui.button() }}" type="submit">{{ 'Pausieren' if s.active else 'Fortsetzen' }}</button></form>
+    {% set toggle = 'Pausieren' if s.active else 'Fortsetzen' %}
+    <form method="post" action="/searches/{{ s.id }}/toggle">{{ ui.csrf_field(csrf) }}<button class="{{ ui.tool_button() }}" type="submit" title="{{ toggle }}" aria-label="Gesuch {{ toggle|lower }}">{{ ui.icon('pause' if s.active else 'play') }}</button></form>
   </div>
 </section>
 
@@ -79,6 +81,14 @@
     {% endif %}
   </div>
 </details>
+
+{# Nach dem Ausblenden (Liste oder Galerie) einige Sekunden „Rückgängig“ anbieten (app.js) #}
+<div class="pointer-events-none fixed inset-x-0 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4" role="status">
+  <div class="pointer-events-auto flex items-center gap-3 rounded-full bg-ink py-1.5 pr-1.5 pl-4.5 text-ui text-canvas shadow-[0_8px_30px_rgba(0,0,0,0.25)]" data-undo hidden>
+    <span>Ausgeblendet</span>
+    <button class="cursor-pointer rounded-full px-3 py-1.5 font-semibold text-canvas hover:bg-canvas/15" type="button" data-undo-button>Rückgängig</button>
+  </div>
+</div>
 
 <section class="mt-16 border-t border-line pt-5">
   <form method="post" action="/searches/{{ s.id }}/delete" data-confirm="Gesuch „{{ s.title }}“ wirklich löschen?">

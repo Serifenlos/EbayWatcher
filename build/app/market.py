@@ -21,9 +21,20 @@ Wann zwei Angebote dasselbe Produkt sind:
 1. gleiche eBay-Katalognummer (ePID), sonst
 2. gleiche Artikelnummer, und zwar die erste im Titel (spätere Nummern stehen oft bei Sets oder
    „passend für …“), sonst
-3. ohne Nummern: sehr ähnliche Titel. Verglichen werden die Wörter ohne Suchbegriff, Füllwörter und
-   Maßangaben. Wörter, die mehrere, aber nicht fast alle Titel haben („Compact“, „Wireless“), zählen am
-   meisten; Wörter aus nur einem Titel („optisch“) wenig.
+3. ohne Nummern: gleiche Modelle und sehr ähnliche Titel.
+   Modelle sind kurze Typnummern mit drei oder vier Ziffern („1220E“, „7590“, „600D“). Ein einzelner
+   Buchstabe am Ende zählt nicht (1220 = 1220E). Nennen beide Titel Modelle, müssen es dieselben sein:
+   „1260E + 1220E“ ist ein anderes Produkt als „1220E“. Was hinter „kompatibel“ oder „passend“ steht,
+   zählt nicht. Dann die übrigen Wörter ohne Suchbegriff, Füllwörter und Maßangaben: Wörter, die
+   mehrere, aber nicht fast alle Titel haben („Compact“, „Wireless“), zählen am meisten; Wörter aus
+   nur einem Titel („optisch“) wenig. Stimmen die Modelle überein, reicht eine geringere Ähnlichkeit.
+In allen drei Fällen muss die Stückzahl gleich sein: „2er Set“, „2x“, „2 Stück“, „Set“ ohne Zahl
+(= 2) oder zwei genannte Modelle sind 2 Stück, „Einzeladapter“ oder „Single“ 1 Stück. „2x LAN“ ist
+keine Stückzahl, sondern eine Ausstattung.
+Beim Vergleich nach dem Titel erscheint der Ø nur, wenn die Preise nah genug beieinander liegen: Ist
+die mittlere Hälfte breiter als MAX_SPREAD des Medians, sind es vermutlich verschiedene Produkte.
+Hat ein Angebot eine Nummer, aber dazu gibt es zu wenig Vergleich, wird nach dem Titel verglichen,
+ohne Angebote mit einer anderen Nummer.
 """
 from __future__ import annotations
 
@@ -45,6 +56,8 @@ MAX_MONTHS = 24               # längster einstellbarer Zeitraum; ältere Vergle
 MONTH = 30.44 * 86400
 MIN_COMPARABLES = 3           # weniger Vergleichsangebote: kein Ø
 SIMILAR = 0.65                # Mindest-Ähnlichkeit der Titel ohne Nummern (0 bis 1)
+SIMILAR_MODEL = 0.2           # … wenn beide Titel dieselben Modelle nennen
+MAX_SPREAD = 0.5              # Titelvergleich: mittlere Hälfte höchstens so breit (Anteil am Median)
 
 # Wörter, die nichts über das Produkt sagen. Bewusst nicht dabei: „defekt“, „wireless“, „pro“ …
 STOPWORDS = frozenset("""
@@ -59,11 +72,32 @@ gewährleistung ware art nr no artikel artikelnummer ca rar rarität vintage sel
 ean sb the and with for of new used box oem 3d voll funktionsfähig funktionsfaehig funktioniert getestet
 geprüft gepflegt sauber leichte gebrauchsspuren""".split())
 
-_UNIT = re.compile(r"^\d+(?:[.,]\d+)?(?:mm|cm|m|kg|g|v|w|ah|mah|l|ml|gb|tb|hz|khz|mhz|ghz|x|er|"
-                   r"tlg|teilig|stk|st|qmm|mm2|hrc|nm|lm|zoll|bit|tasten)$")
+_UNITS = (r"mm|cm|m|kg|g|v|w|ah|mah|l|ml|mb|gb|tb|hz|khz|mhz|ghz|x|er|tlg|teilig|stk|st|qmm|mm2|hrc|nm|lm|"
+          r"zoll|bit|kbit|mbit|mbits|mbps|gbit|gbits|gbps|watt|tasten")
+_UNIT = re.compile(rf"^\d+(?:[.,]\d+)?(?:{_UNITS})$")
+_NUM_UNIT = re.compile(rf"(?<![\w.,])(\d+(?:[.,]\d+)?) (?=(?:mb|gb|tb|kbit|mbit|mbits|mbps|gbit|gbits|gbps|"
+                       rf"mhz|ghz|watt|mah|ah|kg|mm|cm|v|w)(?![a-zäöüß]))")      # „1200 Mbit/s“ → 1200mbit
+_PERCENT = re.compile(r"\d+(?:[.,]\d+)?\s*%")
+_MODEL = re.compile(r"^[a-z]{0,3}\d{3,4}[a-z]{0,2}$")                            # 1220e, 7590, 600d, gtx1080
+_COMPAT = re.compile(r"\b(?:kompatibel|passend|geeignet|compatible|fits)\b.*$")
+# Stückzahl: „2er“, „2-er“, „4er-Set“, „2 Stück“, „3-teilig“, „2 Adapter“
+_TOTAL = re.compile(r"(?<![\w.,])(\d{1,2}) ?-? ?(?:er|stück|stueck|stk|stck|teilig|tlg|pack|geräte|adapter)"
+                    r"(?![a-zäöüß])(?! ?-?jahre)")                                  # nicht „70er Jahre“
+_TIMES = re.compile(r"(?<![\w.,])(je )?(\d{1,2}) ?[x×] ?([a-z0-9äöüß]+)?")          # „2x Adapter“, „2 x 1260E“
+# Was nach „2x“ steht und keine Stückzahl, sondern Ausstattung ist („2x LAN“, „2x Akku“)
+_FEATURES = frozenset("""lan gigabit giga gbit ethernet rj rj45 usb hdmi displayport dp vga port ports anschluss
+anschlüsse anschluß anschluesse netzwerk sata pcie kabel akku akkus batterie batterien ladegerät ladegeraet
+antenne antennen lüfter luefter ram slot slots steckdose steckdosen schuko""".split())
+_SINGLE = frozenset("einzel einzeln einzeladapter einzelgerät single solo".split())
+_PAIR = frozenset("paar duo twin doppelpack".split())
+_SET = frozenset("set sets kit starterkit adapterkit pack bundle paket".split())
+_QUANTITY_WORDS = _SINGLE | _PAIR | _SET
+_NOT_SUFFIX = frozenset("an am ab um so da ja ok de eu uk us wi fi dl".split())   # „1220 an …“, „Wi-Fi“
 _GROUPS3 = re.compile(r"(?<!\w)(\d{2})[ -](\d{2})[ -](\d{2,3})(?!\w)")   # Knipex: 87 01 250
 _GROUPS2 = re.compile(r"(?<!\w)(\d{4}) (\d{3})(?!\w)")                     # 8701 250
+_GROUPS4 = re.compile(r"(\(|\b(?:art|nr|artnr|artikelnummer)[.:]? ?)(\d{4}) (\d{4})(?!\w)")  # (2000 2737)
 _PREFIX = re.compile(r"(?<!\w)([a-z0-9]{1,5})-(\d{3,})(?!\w)")             # 3DX-700059
+_TIMES_GLUED = re.compile(r"(?<![\w.,])(\d{1,2}) ?[x×](?=[a-z]{0,3}\d{3})")      # 2x520E → 2x 520E
 _TOKEN = re.compile(r"[a-z0-9äöüß]+")
 
 
@@ -73,6 +107,10 @@ def normalize(title: str) -> str:
     t = (title or "").lower().replace("®", " ").replace("™", " ").replace("©", " ")
     t = _GROUPS3.sub(r"\1\2\3", t)
     t = _GROUPS2.sub(r"\1\2", t)
+    t = _GROUPS4.sub(r"\1\2\3", t)
+    t = _TIMES_GLUED.sub(r"\1x ", t)
+    t = _PERCENT.sub(" ", t)
+    t = _NUM_UNIT.sub(r"\1", t)
     return _PREFIX.sub(r"\1\2", t)
 
 
@@ -97,10 +135,65 @@ def raw_number(title: str, number: str) -> str:
     return m.group(0) if m else number
 
 
+def _is_model(token: str) -> bool:
+    return bool(_MODEL.match(token)) and not _UNIT.match(token) and not _is_number(token)
+
+
+def _model_core(token: str) -> str:
+    """1220e → 1220, 600d → 600; zwei Buchstaben bleiben (1080ti)."""
+    return re.sub(r"(?<=\d)[a-z]$", "", token)
+
+
+def _product_tokens(title: str) -> list[str]:
+    """Wörter ohne das, was hinter „kompatibel“ oder „passend“ steht."""
+    return _TOKEN.findall(_COMPAT.sub("", normalize(title)))
+
+
+def models(title: str) -> frozenset[str]:
+    """Typnummern im Titel: „Powerline 1260E + 1220E“ → {1260, 1220}. Zwei Buchstaben direkt dahinter
+    gehören dazu: „Repeater 1200 AX“ → {1200ax}, ein anderes Gerät als der Repeater 1200."""
+    words = _product_tokens(title)
+    found = set()
+    for i, word in enumerate(words):
+        if not _is_model(word):
+            continue
+        core = _model_core(word)
+        after = words[i + 1] if i + 1 < len(words) else ""
+        if len(after) == 2 and after.isalpha() and after not in STOPWORDS and after not in _NOT_SUFFIX:
+            core += after
+        found.add(core)
+    return frozenset(found)
+
+
+def units(title: str) -> int:
+    """Wie viele Stück das Angebot enthält (siehe oben)."""
+    text = " ".join(_product_tokens(title))
+    total = [int(n) for n in _TOTAL.findall(text)]
+    if total:
+        return max(total)
+    counted, count = set(), 0
+    for per_item, n, after in _TIMES.findall(text):
+        if (per_item or not after or after in _FEATURES or _UNIT.match(after)
+                or (after.isdigit() and not _is_model(after))):
+            continue   # „je 2x 1GB“, „2x LAN“
+        count += int(n)
+        if _is_model(after):
+            counted.add(_model_core(after))
+    found = models(title)
+    if count:
+        return count + len(found - counted) if counted else count   # „3x 1220E + 530E“ = 4
+    words = set(text.split())
+    if words & _SINGLE:
+        return 1
+    if words & (_PAIR | _SET):
+        return 2
+    return max(1, len(found))   # „1260E + 1220E“ = 2
+
+
 def signature(title: str, ignore: set[str]) -> frozenset[str]:
     return frozenset(t for t in tokens(title)
-                     if len(t) > 1 and t not in STOPWORDS and t not in ignore
-                     and not _UNIT.match(t) and not _is_number(t))
+                     if len(t) > 1 and t not in STOPWORDS and t not in ignore and t not in _QUANTITY_WORDS
+                     and not _UNIT.match(t) and not _is_number(t) and not _is_model(t))
 
 
 # ---------------------------------------------------------------- Einstellungen
@@ -141,6 +234,8 @@ class Listing:
     gone: bool                  # nicht mehr online
     sold: bool                  # vermutlich verkauft
     sig: frozenset[str] = frozenset()
+    models: frozenset[str] = frozenset()
+    units: int = 1
 
 
 def _median_parts(values: list[float]) -> tuple[float, float, float]:
@@ -180,7 +275,8 @@ class Comparison:
                 item_id=r["item_id"], title=r["title"] or "", epid=r["epid"], number=r["number"],
                 cond=r["cond"], price=r["price"], shipping=r["shipping"], fetched_at=r["fetched_at"],
                 last_seen=r["last_seen"] or r["fetched_at"], gone=r["gone_at"] is not None, sold=bool(r["sold"]),
-                sig=signature(r["title"] or "", self.ignore)) for r in rows]
+                sig=signature(r["title"] or "", self.ignore), models=models(r["title"] or ""),
+                units=units(r["title"] or "")) for r in rows]
         # Gewichte der Wörter: je seltener in der Gesuch-Suche, desto wichtiger
         base = self.listings.get(search_key(search["id"]), [])
         self._count = len(base)
@@ -204,6 +300,15 @@ class Comparison:
         total = sum(self._weight(w) for w in union)
         return sum(self._weight(w) for w in a & b) / total
 
+    def _same_title(self, sig: frozenset[str], own: frozenset[str], c: Listing) -> bool:
+        """Gleiches Produkt nach dem Titel: gleiche Modelle, wenn beide welche nennen, und ähnliche Wörter."""
+        if own and c.models:
+            if own != c.models:
+                return False
+            # Steht in einem Titel nichts, was im anderen fehlt („Powerline 1260E + 1220E“), passt er auch.
+            return sig <= c.sig or c.sig <= sig or self._similarity(sig, c.sig) >= SIMILAR_MODEL
+        return bool(sig and c.sig) and self._similarity(sig, c.sig) >= SIMILAR
+
     def compare(self, v: dict) -> dict | None:
         """Ø für ein Angebot oder None, wenn es nicht genug Vergleich gibt."""
         cond = v.get("cond")
@@ -213,7 +318,9 @@ class Comparison:
         epid = v.get("epid")
         title = v.get("title") or ""
         number = article_number(title)
-        sig = signature(title, self.ignore) if not (epid or number) else frozenset()
+        own_models = models(title)
+        own_units = units(title)
+        sig = signature(title, self.ignore)
 
         # Jedes Angebot nur einmal. Steht es in mehreren Quellen, gilt der jüngste Stand
         # (in der einen schon verschwunden, in der anderen noch zu sehen = noch online).
@@ -225,20 +332,27 @@ class Comparison:
                 if known is None or listing.last_seen > known.last_seen:
                     candidates[listing.item_id] = listing
 
-        if epid:
-            basis = "Katalog"
-            same = [c for c in candidates.values() if c.epid == epid or (number and c.number == number)]
-        elif number:
-            basis = "Nummer"
-            same = [c for c in candidates.values() if c.number == number]
-        elif sig:
-            basis = "Titel"
-            same = [c for c in candidates.values() if c.sig and self._similarity(sig, c.sig) >= SIMILAR]
-        else:
-            return None
+        def usable(c: Listing) -> bool:
+            return (c.item_id != v.get("item_id") and c.cond != "parts" and c.units == own_units
+                    and (not self.split or not cond or c.cond == cond))
 
-        same = [c for c in same if c.item_id != v.get("item_id") and c.cond != "parts"
-                and (not self.split or not cond or c.cond == cond)]
+        # Vom Genauesten zum Ungenauesten; es gilt die erste Stufe mit genug Vergleichsangeboten.
+        # Der Titel-Vergleich lässt Angebote mit einer anderen Nummer weg.
+        steps = []
+        if epid:
+            steps.append(("Katalog", lambda c: c.epid == epid or (number and c.number == number)))
+        if number:
+            steps.append(("Nummer", lambda c: c.number == number))
+        if sig or own_models:
+            steps.append(("Modell" if own_models else "Titel",
+                          lambda c: (not c.number or not number or c.number == number)
+                          and (not c.epid or not epid or c.epid == epid)
+                          and self._same_title(sig, own_models, c)))
+        basis, same = None, []
+        for basis, test in steps:
+            same = [c for c in candidates.values() if usable(c) and test(c)]
+            if len(same) >= MIN_COMPARABLES:
+                break
         if len(same) < MIN_COMPARABLES:
             return None
 
@@ -250,6 +364,8 @@ class Comparison:
         median, low, high = _median_parts([price(c) for c in same])
         if median <= 0:
             return None
+        if basis in ("Modell", "Titel") and (high - low) / median > MAX_SPREAD:
+            return None   # nach dem Titel verglichen und Preise weit auseinander: vermutlich verschiedene Produkte
         sold = [price(c) for c in same if c.sold]
         delta = round((total - median) / median * 100)
         tone = "good" if delta <= -self.threshold else ("high" if delta >= self.threshold else "normal")
@@ -258,16 +374,23 @@ class Comparison:
             "online": sum(not c.gone for c in same), "sold": len(sold),
             "sold_median": statistics.median(sold) if len(sold) >= MIN_COMPARABLES else None,
             "delta_text": "±0 %" if delta == 0 else f"{'−' if delta < 0 else '+'}{abs(delta)} %",
+            "basis": basis,
             "hint": _hint(basis, number and raw_number(title, number), same, low, high, sold,
-                          cond if self.split else None, self.months, with_shipping),
+                          cond if self.split else None, self.months, with_shipping,
+                          own_models, own_units),
         }
 
 
 def _hint(basis: str, number: str | None, same: list[Listing], low: float, high: float, sold: list[float],
-          cond: str | None, period: int, with_shipping: bool) -> str:
+          cond: str | None, period: int, with_shipping: bool, own_models: frozenset[str] = frozenset(),
+          own_units: int = 1) -> str:
     what = {"Katalog": "desselben Produkts im eBay-Katalog",
             "Nummer": f"mit der Artikelnummer {number}",
+            "Modell": f"mit {'dem Modell' if len(own_models) == 1 else 'den Modellen'} "
+                      f"{' + '.join(sorted((m.upper() for m in own_models), key=lambda m: (len(m), m)))} und ähnlichem Titel",
             "Titel": "mit sehr ähnlichem Titel"}[basis]
+    if own_units > 1:
+        what += f", ebenfalls {own_units} Stück"
     kind = {"new": "neuen ", "used": "gebrauchten "}.get(cond or "", "")
     online = sum(not c.gone for c in same)
     parts = [f"{online} noch online"]
