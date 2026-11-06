@@ -447,15 +447,17 @@ def due(key: str, now: float | None = None) -> bool:
 
 
 def store(key: str, listings: list[dict] | None, now: float | None = None,
-          complete: bool | None = None) -> int:
+          complete: bool | None = None, user_id: int | None = None) -> int:
     """Ergänzt den Verlauf um die Antwort einer Abfrage (Angebote in der gemeinsamen Form der Plattformen).
     listings=None heißt: Abfrage fehlgeschlagen.
-    complete: Enthält die Antwort alle Angebote? Nur dann gelten fehlende als verschwunden."""
+    complete: Enthält die Antwort alle Angebote? Nur dann gelten fehlende als verschwunden.
+    user_id: mit wessen Zugangsdaten abgefragt wurde (zählt für dessen Tageslimit). Der Verlauf selbst
+    gehört allen Konten."""
     now = now or time.time()
     before = source(key)
-    db.ex("INSERT INTO market_sources(key, fetched_at, ok, last_used) VALUES (?, ?, ?, ?) "
-          "ON CONFLICT(key) DO UPDATE SET fetched_at = excluded.fetched_at, ok = excluded.ok",
-          (key, now, 0 if listings is None else 1, now))
+    db.ex("INSERT INTO market_sources(key, fetched_at, ok, last_used, user_id) VALUES (?, ?, ?, ?, ?) "
+          "ON CONFLICT(key) DO UPDATE SET fetched_at = excluded.fetched_at, ok = excluded.ok, "
+          "user_id = excluded.user_id", (key, now, 0 if listings is None else 1, now, user_id))
     if listings is None:
         return 0
     count = 0
@@ -495,10 +497,11 @@ def forget_search(search_id: int) -> None:
     db.ex("UPDATE market_sources SET fetched_at = 0 WHERE key = ?", (search_key(search_id),))
 
 
-def lookups_today() -> int:
+def lookups_today(user_id: int | None = None) -> int:
+    """Heutige gezielte Abfragen (ohne die tägliche Gesuch-Suche), mit den Zugangsdaten dieses Kontos."""
     start = datetime.now(ZoneInfo(config.TZ)).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-    row = db.q1("SELECT COUNT(*) AS n FROM market_sources WHERE key NOT LIKE 'search:%' AND fetched_at >= ?",
-                (start,))
+    row = db.q1("SELECT COUNT(*) AS n FROM market_sources WHERE key NOT LIKE 'search:%' AND fetched_at >= ? "
+                "AND COALESCE(user_id, 0) = ?", (start, user_id or 0))
     return row["n"] if row else 0
 
 

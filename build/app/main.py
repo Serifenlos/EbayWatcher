@@ -34,6 +34,7 @@ watcher = Watcher()
 async def lifespan(_app: FastAPI):
     db.init()
     auth.ensure_admin()
+    db.adopt_owner_data()   # alles, was noch keinem Konto gehört, dem Admin geben
     plattformen.adopt_from_environment(dict(os.environ), log)
     watcher.start()
     log.info("Heuhaufen %s läuft.", config.APP_VERSION)
@@ -75,7 +76,7 @@ def gallery_url(v: dict) -> str:
 
 
 templates.env.globals.update(
-    eur=util.eur, countdown=util.countdown, local_time=util.local_time, ago=util.ago,
+    eur=util.eur, countdown=util.countdown, local_time=util.local_time, ago=util.ago, date_time=util.date_time,
     gauge=util.gauge, asset=asset, image_url=image_url, gallery_url=gallery_url, app_name=config.APP_NAME,
     app_version=config.APP_VERSION, repo_url=config.REPO_URL,
 )
@@ -101,6 +102,13 @@ MESSAGES = {
     "display": "Gespeichert.",
     "unhidden": "Angebot wieder eingeblendet.",
     "logout": "Du bist abgemeldet.",
+    "email": "E-Mail-Adresse gespeichert.",
+    "welcome": "Willkommen bei Heuhaufen! Trage zuerst deine eBay-Zugangsdaten ein.",
+    "reset": "Neues Passwort gespeichert. Melde dich jetzt damit an.",
+    "invite_revoked": "Einladung zurückgezogen.",
+    "user_locked": "Konto gesperrt. Seine Gesuche ruhen, bis du es wieder entsperrst.",
+    "user_unlocked": "Konto entsperrt.",
+    "user_deleted": "Konto mit allen Gesuchen gelöscht.",
 }
 
 # Bilder kommen aus dem eigenen Cache; von den Plattformen nur, falls der Cache ein Bild nicht laden konnte
@@ -108,7 +116,11 @@ CSP = ("default-src 'self'; img-src 'self' data: " + " ".join(f"https://*{h}" fo
        + "; style-src 'self'; script-src 'self'; "
        "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 # /bild/ und /erinnern/ ohne Login: Sie ruft das Handy aus der Benachrichtigung auf. Geschützt durch die Signatur.
-PUBLIC_PREFIXES = ("/login", "/static/", "/healthz", "/favicon", "/bild/", "/erinnern/")
+# /einladung/ und /zuruecksetzen/: Links vom Admin, geschützt durch das Geheimnis im Link (auth.create_token).
+PUBLIC_PREFIXES = ("/login", "/static/", "/healthz", "/favicon", "/bild/", "/erinnern/", "/einladung/",
+                   "/zuruecksetzen/")
+# Seiten eines Gesuchs: nur für das Konto, dem es gehört (Prüfung in guard)
+SEARCH_PATH = re.compile(r"^/(?:searches|galerie)/(\d+)(?:/|$)")
 
 
 # ---------------------------------------------------------------- Hilfen
@@ -157,8 +169,10 @@ def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLRe
     ctx.setdefault("flash_err", MESSAGES.get(request.query_params.get("err", "")))
     ctx.setdefault("active", "")
     ctx["signed_in"] = sess is not None
+    user = getattr(request.state, "user", None)
+    ctx["is_admin"] = bool(user and user["role"] == "admin")
     if sess is not None:
-        ctx.setdefault("prices_with_shipping", util.with_shipping(db.get_settings()))
+        ctx.setdefault("prices_with_shipping", util.with_shipping(db.get_settings(sess["user_id"])))
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
 
 
@@ -179,6 +193,15 @@ def current_user(request: Request) -> dict:
     return db.q1("SELECT * FROM users WHERE id = ?", (request.state.session["user_id"],))
 
 
+def uid(request: Request) -> int:
+    """Konto der angemeldeten Person."""
+    return request.state.session["user_id"]
+
+
+def user_settings(request: Request) -> dict:
+    return db.get_settings(uid(request))
+
+
 def back(path: str, key: str | None = None, err: bool = False, anchor: str = "") -> RedirectResponse:
     url = path + (f"?{'err' if err else 'ok'}={key}" if key else "") + (f"#{anchor}" if anchor else "")
     return RedirectResponse(url, 303)
@@ -190,17 +213,28 @@ def back(path: str, key: str | None = None, err: bool = False, anchor: str = "")
 async def guard(request: Request, call_next):
     request.state.session = None
     path = request.url.path
+    request.state.user = None
     legacy = None
     if not path.startswith(PUBLIC_PREFIXES):
         token, is_legacy = auth.session_token(request.cookies)
         sess = auth.load_session(token)
+        user = db.q1("SELECT * FROM users WHERE id = ?", (sess["user_id"],)) if sess else None
+        if user and not user["active"]:   # gesperrt: abmelden
+            db.ex("DELETE FROM sessions WHERE user_id = ?", (user["id"],))
+            sess = user = None
         if not sess:
             target = "/login"
             if request.method == "GET" and path != "/":
                 target += "?next=" + quote(path)
             return _with_headers(RedirectResponse(target, 303))
         request.state.session = sess
+        request.state.user = user
         legacy = token if is_legacy else None
+        match = SEARCH_PATH.match(path)
+        if match:   # fremde Gesuche gibt es für dieses Konto nicht
+            owner = db.q1("SELECT user_id FROM searches WHERE id = ?", (int(match.group(1)),))
+            if owner and owner["user_id"] != user["id"] and not (owner["user_id"] is None and user["role"] == "admin"):
+                return _with_headers(not_found(request))
     resp = await call_next(request)
     if legacy:   # Anmeldung aus „Ebay Watcher“: Cookie unter dem neuen Namen weiterführen
         remaining = int(request.state.session["expires_at"] - time.time())
@@ -258,13 +292,13 @@ async def article_image(request: Request, sid: int, item_id: str):
 
 
 @app.get("/galerie/{sid}/{item_id}")
-async def gallery(sid: int, item_id: str):
+async def gallery(request: Request, sid: int, item_id: str):
     """Bilder eines Angebots für die Galerie (PhotoSwipe, siehe app.js), mit Breite und Höhe, dazu die
     Seitenleiste (panel) als fertiges HTML. Beim ersten Öffnen lädt Heuhaufen alle Bilder groß bei der
     Plattform und legt sie in den Bild-Cache. Beschreibung und Gebote holt es mit einer Einzelabfrage,
     höchstens alle 10 Minuten (details.py)."""
     row = db.q1("SELECT * FROM items WHERE search_id = ? AND item_id = ?", (sid, item_id))
-    settings = db.get_settings()
+    settings = user_settings(request)
     p = plattformen.of_item(row) if row else None
     if row and row["status"] == "active" and p.details and p.configured(settings) and details.due(item_id):
         try:
@@ -281,16 +315,16 @@ async def gallery(sid: int, item_id: str):
         size = images.dimensions(path) if path else None
         if size:   # Bilder, die die Plattform gerade nicht liefert, fehlen in der Galerie
             items.append({"src": images.url(sid, item_id, original, n, big=True), "width": size[0], "height": size[1]})
-    return JSONResponse({"items": items, "panel": _gallery_panel(sid, item_id)}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"items": items, "panel": _gallery_panel(sid, item_id, settings)},
+                        headers={"Cache-Control": "no-store"})
 
 
-def _gallery_panel(sid: int, item_id: str) -> str:
+def _gallery_panel(sid: int, item_id: str, settings: dict) -> str:
     """Seitenleiste der Galerie: Preis, Zustand, Ø, Gebote, Merkmale und Beschreibung (includes/gallery_panel.html)."""
     s = db.q1("SELECT * FROM searches WHERE id = ?", (sid,))
     if not s:
         return ""
     now = time.time()
-    settings = db.get_settings()
     overview = util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (sid,)), now, db.hidden_ids(sid))
     v = None
     for group in ("matches", "over"):   # Ø wie in der Liste: im Vergleich mit den übrigen Angeboten
@@ -321,6 +355,7 @@ def _login_form(request: Request, next_: str = "/", error: str | None = None,
 
 
 def _complete_login(request: Request, user_id: int, remember: bool, next_: str) -> RedirectResponse:
+    db.ex("UPDATE users SET last_login = ? WHERE id = ?", (time.time(), user_id))
     token = auth.create_session(user_id, remember, request.headers.get("user-agent", ""))
     resp = RedirectResponse(next_, 303)
     set_cookie(resp, request, auth.SESSION_COOKIE, token, max_age=auth.REMEMBER_SECONDS if remember else None)
@@ -353,11 +388,14 @@ async def login(request: Request):
         return _login_form(request, next_, f"Zu viele Fehlversuche. Versuche es in {max(1, wait // 60)} Minuten wieder.",
                            username, 429)
 
-    user = db.q1("SELECT * FROM users WHERE username = ?", (username,))
+    user = auth.find_login(username)   # Benutzername oder E-Mail-Adresse
     if not auth.verify_password(user, password):
         auth.throttle.fail(ip, username)
         return _login_form(request, next_, "Benutzername oder Passwort stimmt nicht.", username, 401)
     auth.throttle.reset(ip)
+    if not user["active"]:
+        return _login_form(request, next_, "Dieses Konto ist gesperrt. Wende dich an die Person, die Heuhaufen "
+                                           "betreibt.", username, 403)
 
     if user["totp_enabled"]:
         token = auth.create_session(user["id"], remember, request.headers.get("user-agent", ""), pending=True)
@@ -415,8 +453,8 @@ async def logout(request: Request):
 
 # ---------------------------------------------------------------- Übersicht
 
-def _notices() -> list[dict]:
-    s = db.get_settings()
+def _notices(request: Request) -> list[dict]:
+    s = user_settings(request)
     out = []
     if not plattformen.any_configured(s):
         p = plattformen.get(plattformen.DEFAULT)
@@ -425,8 +463,8 @@ def _notices() -> list[dict]:
     if not notify.configured(s):
         out.append({"text": "Benachrichtigungen sind noch nicht eingerichtet.",
                     "link": "/settings#benachrichtigungen", "action": "Einrichten"})
-    elif watcher.last_ntfy_error:
-        out.append({"text": f"Die letzte Benachrichtigung ist nicht angekommen. {watcher.last_ntfy_error}",
+    elif watcher.ntfy_error(uid(request)):
+        out.append({"text": f"Die letzte Benachrichtigung ist nicht angekommen. {watcher.ntfy_error(uid(request))}",
                     "link": "/settings#benachrichtigungen", "action": "Prüfen"})
     if not s["plz"]:
         out.append({"text": "Ohne Postleitzahl findet Heuhaufen keine Abholangebote in deiner Nähe.",
@@ -437,7 +475,7 @@ def _notices() -> list[dict]:
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     now = time.time()
-    searches = db.q("SELECT * FROM searches ORDER BY active DESC, created_at DESC")
+    searches = db.q("SELECT * FROM searches WHERE user_id = ? ORDER BY active DESC, created_at DESC", (uid(request),))
     hidden = db.hidden_ids_by_search()
     overviews = [
         util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (s["id"],)), now,
@@ -446,7 +484,7 @@ async def dashboard(request: Request):
     ]
     overviews.sort(key=util.dashboard_order)
     return render(request, "dashboard.html", active="searches", searches=overviews,
-                  notices=_notices(), last_tick=watcher.last_tick, now=now)
+                  notices=_notices(request), last_tick=watcher.last_tick, now=now)
 
 
 # ---------------------------------------------------------------- Gesuche
@@ -515,7 +553,7 @@ SEARCH_COLUMNS = ["name", "query", "exclude", "format", "location", "max_price",
 
 def _render_form(request: Request, values: dict, errors: dict, mode: str, sid: int | None = None,
                  status: int = 200) -> HTMLResponse:
-    settings = db.get_settings()
+    settings = user_settings(request)
     return render(request, "search_form.html", status_code=status, active="searches", values=values,
                   errors=errors, mode=mode, sid=sid, has_plz=bool(settings["plz"]),
                   radius=db.setting_int(settings, "radius_km", 50),
@@ -524,7 +562,7 @@ def _render_form(request: Request, values: dict, errors: dict, mode: str, sid: i
 
 @app.get("/searches/new", response_class=HTMLResponse)
 async def new_search_page(request: Request):
-    return _render_form(request, _form_defaults(db.get_settings()), {}, "new")
+    return _render_form(request, _form_defaults(user_settings(request)), {}, "new")
 
 
 @app.post("/searches/new")
@@ -534,9 +572,9 @@ async def create_search(request: Request):
     if errors:
         return _render_form(request, values, errors, "new", status=422)
     sid = db.ex(
-        f"INSERT INTO searches({', '.join(SEARCH_COLUMNS)}, created_at) "
-        f"VALUES ({', '.join('?' * len(SEARCH_COLUMNS))}, ?)",
-        [*[values[c] for c in SEARCH_COLUMNS], time.time()],
+        f"INSERT INTO searches({', '.join(SEARCH_COLUMNS)}, user_id, created_at) "
+        f"VALUES ({', '.join('?' * len(SEARCH_COLUMNS))}, ?, ?)",
+        [*[values[c] for c in SEARCH_COLUMNS], uid(request), time.time()],
     )
     watcher.poke()
     return back(f"/searches/{sid}", "created")
@@ -550,7 +588,7 @@ async def search_detail(request: Request, sid: int):
     now = time.time()
     overview = util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (sid,)), now,
                                     db.hidden_ids(sid))
-    settings = db.get_settings()
+    settings = user_settings(request)
     market.attach(overview, settings, overview["matches"])
     if request.query_params.get("show") == "over":
         market.attach(overview, settings, overview["over"])
@@ -579,7 +617,7 @@ async def search_list(request: Request, sid: int, kind: str):
     if kind == "over":
         offers = util.search_overview(s, db.q("SELECT * FROM items WHERE search_id = ?", (sid,)), now,
                                       db.hidden_ids(sid))["over"]
-        market.attach(s, db.get_settings(), offers)
+        market.attach(s, user_settings(request), offers)
     else:
         offers = _hidden_views(s, now)
     return render(request, "includes/offer_list.html", offers=offers, kind=kind, sid=sid, now=now)
@@ -671,25 +709,28 @@ def _settings_page(request: Request, errors: dict | None = None, values: dict | 
         for x in db.q("SELECT * FROM sessions WHERE user_id = ? AND pending_2fa = 0 ORDER BY last_seen DESC",
                       (user["id"],))
     ]
-    stored = db.get_settings()
+    stored = db.get_settings(user["id"])
     s = {**stored, **(values or {})}
     return render(request, "settings.html", status_code=status, active="settings", s=s, user=user,
                   errors=errors or {}, sessions=sessions, platforms=_platform_panels(stored),
-                  ntfy_error=watcher.last_ntfy_error, has_token=bool(s.get("ntfy_token")),
-                  image_cache=images.stats(), market_lookups_today=market.lookups_today())
+                  ntfy_error=watcher.ntfy_error(user["id"]), has_token=bool(s.get("ntfy_token")),
+                  image_cache=images.stats() if user["role"] == "admin" else None,   # Cache: für alle gemeinsam
+                  market_lookups_today=market.lookups_today(user["id"]))
 
 
 def _platform_panels(settings: dict) -> list[dict]:
-    """Je Plattform: Zugangsdaten, Abfragen heute nach Zweck (feste Reihenfolge), gestern, letzte Prüfung."""
+    """Je Plattform: Zugangsdaten, Abfragen heute nach Zweck (feste Reihenfolge), gestern, letzte Prüfung –
+    alles für das Konto, dem diese Einstellungen gehören."""
     labels = {**PURPOSES, "ohne": "Vor dem Update, ohne Zuordnung"}
+    user_id = settings.get("_user_id")
     out = []
     for p in plattformen.ALL.values():
-        calls = db.api_calls_by_purpose(platform=p.key)
+        calls = db.api_calls_by_purpose(platform=p.key, user_id=user_id)
         out.append({
             "key": p.key, "name": p.name, "credentials": p.credentials, "configured": p.configured(settings),
-            "check": watcher.last_checks.get(p.key), "calls": db.api_calls_today(p.key),
+            "check": watcher.last_checks.get((user_id, p.key)), "calls": db.api_calls_today(p.key, user_id),
             "purposes": [(label, calls[key]) for key, label in labels.items() if calls.get(key)],
-            "calls_yesterday": sum(db.api_calls_by_purpose(1, p.key).values()),
+            "calls_yesterday": sum(db.api_calls_by_purpose(1, p.key, user_id).values()),
             "hints": {c.key: plattformen.secret_hint(settings, c.key) for c in p.credentials if c.secret},
         })
     return out
@@ -703,7 +744,9 @@ async def settings_page(request: Request):
 @app.post("/settings/general")
 async def save_general(request: Request):
     form = await checked_form(request)
-    values = {k: str(form.get(k, "")).strip() for k in ("radius_km", "lead_minutes", "interval_minutes", "app_url")}
+    admin = request.state.user["role"] == "admin"
+    keys = ("radius_km", "lead_minutes", "interval_minutes") + (("app_url",) if admin else ())   # Adresse: nur Admin
+    values = {k: str(form.get(k, "")).strip() for k in keys}
     values["plz"] = str(form.get("mittelpunkt", "")).strip()   # Feldname ohne „plz“, siehe settings.html
     errors = {}
     if values["plz"] and not re.fullmatch(r"\d{5}", values["plz"]):
@@ -711,14 +754,14 @@ async def save_general(request: Request):
     for key, lo, hi in (("radius_km", 1, 500), ("lead_minutes", 1, 180), ("interval_minutes", 5, 240)):
         if not values[key].isdigit() or not lo <= int(values[key]) <= hi:
             errors[key] = f"Wähle eine Zahl von {lo} bis {hi}."
-    if values["app_url"] and not values["app_url"].startswith(("http://", "https://")):
+    if values.get("app_url") and not values["app_url"].startswith(("http://", "https://")):
         errors["app_url"] = "Die Adresse beginnt mit http:// oder https://."
     if errors:
         return _settings_page(request, errors, values, 422)
-    old = db.get_settings()
+    old = user_settings(request)
     if (old["plz"], old["radius_km"]) != (values["plz"], values["radius_km"]):
-        watcher.forget_pickup()   # Abholangebote gleich neu suchen, nicht erst nach einer Stunde
-    db.set_settings(values)
+        watcher.forget_pickup(uid(request))   # Abholangebote gleich neu suchen, nicht erst nach einer Stunde
+    db.set_settings(values, uid(request))
     watcher.poke()
     return back("/settings", "saved", anchor="standort")
 
@@ -726,7 +769,7 @@ async def save_general(request: Request):
 @app.post("/settings/display")
 async def save_display(request: Request):
     form = await checked_form(request)
-    db.set_settings({"price_with_shipping": "1" if form.get("price_with_shipping") else "0"})
+    db.set_settings({"price_with_shipping": "1" if form.get("price_with_shipping") else "0"}, uid(request))
     return back("/settings", "display", anchor="anzeige")
 
 
@@ -743,7 +786,7 @@ async def save_market(request: Request):
     values["market_split"] = "1" if form.get("market_split") else "0"
     if errors:
         return _settings_page(request, errors, values, 422)
-    db.set_settings(values)
+    db.set_settings(values, uid(request))
     watcher.poke()
     return back("/settings", "market", anchor="durchschnitt")
 
@@ -764,8 +807,8 @@ async def save_ntfy(request: Request):
         values["ntfy_token"] = ""
     elif token:
         values["ntfy_token"] = token
-    db.set_settings(values)
-    watcher.last_ntfy_error = None
+    db.set_settings(values, uid(request))
+    watcher.ntfy_errors.pop(uid(request), None)
     return back("/settings", "saved", anchor="benachrichtigungen")
 
 
@@ -773,13 +816,13 @@ async def save_ntfy(request: Request):
 async def test_ntfy(request: Request):
     await checked_form(request)
     try:
-        await notify.send(db.get_settings(), title="Heuhaufen ist verbunden",
+        await notify.send(user_settings(request), title="Heuhaufen ist verbunden",
                           message="So sehen deine Benachrichtigungen aus. Alles bereit.",
                           tags=["white_check_mark"], priority=3)
-        watcher.last_ntfy_error = None
+        watcher.ntfy_errors.pop(uid(request), None)
         return back("/settings", "ntfy_sent", anchor="benachrichtigungen")
     except notify.NtfyError as e:
-        watcher.last_ntfy_error = str(e)
+        watcher.ntfy_errors[uid(request)] = str(e)
         return back("/settings", "ntfy_failed", err=True, anchor="benachrichtigungen")
 
 
@@ -845,6 +888,17 @@ async def revoke_sessions(request: Request):
     return back("/settings", "sessions", anchor="sicherheit")
 
 
+@app.post("/settings/email")
+async def save_email(request: Request):
+    form = await checked_form(request)
+    email = str(form.get("email", "")).strip()[:200]
+    error = auth.check_email(email, exclude_id=uid(request)) if email else None
+    if error:
+        return _settings_page(request, {"email": error}, {"email": email}, 422)
+    db.ex("UPDATE users SET email = ? WHERE id = ?", (email or None, uid(request)))
+    return back("/settings", "email", anchor="sicherheit")
+
+
 @app.post("/settings/plattform/{key}")
 async def save_platform(request: Request, key: str):
     """Zugangsdaten einer Plattform speichern und gleich prüfen."""
@@ -852,10 +906,10 @@ async def save_platform(request: Request, key: str):
     p = plattformen.ALL.get(key)
     if not p:
         return not_found(request)
-    plattformen.save_credentials(p, form)
-    watcher.last_checks.pop(p.key, None)
-    if p.configured(db.get_settings()):
-        await watcher.check_platform(p.key)
+    plattformen.save_credentials(p, form, uid(request))
+    watcher.last_checks.pop((uid(request), p.key), None)
+    if p.configured(user_settings(request)):
+        await watcher.check_platform(p.key, uid(request))
         watcher.poke()
     return back("/settings", "credentials", anchor=p.key)
 
@@ -865,5 +919,212 @@ async def test_platform(request: Request, key: str):
     await checked_form(request)
     if key not in plattformen.ALL:
         return not_found(request)
-    await watcher.check_platform(key)
+    await watcher.check_platform(key, uid(request))
     return back("/settings", "checked", anchor=key)
+
+
+# ---------------------------------------------------------------- Konten (nur für den Admin)
+#
+# Jedes Konto ist völlig getrennt: eigene Gesuche, Einstellungen und Zugangsdaten. Der Admin sieht hier
+# nur die Konten selbst. Heuhaufen verschickt keine E-Mails: Einladung und Zurücksetzen erzeugen einen
+# Link mit fertigem Text, den der Admin aus seinem Mailprogramm schickt (mailto oder kopieren).
+
+def _is_admin(request: Request) -> bool:
+    return bool(request.state.user and request.state.user["role"] == "admin")
+
+
+def _base_url(request: Request) -> str:
+    """Adresse für Links: die eingetragene Adresse von Heuhaufen, sonst die, über die der Admin gerade da ist."""
+    return (db.get_settings().get("app_url") or "").strip().rstrip("/") or str(request.base_url).rstrip("/")
+
+
+def _mail(request: Request, kind: str, token: str, expires: float, email: str | None,
+          username: str | None = None) -> dict:
+    """Link und fertiger Text für die E-Mail an die eingeladene bzw. zurückzusetzende Person."""
+    admin = request.state.user["username"]
+    until = util.date_time(expires)
+    if kind == "invite":
+        link = f"{_base_url(request)}/einladung/{token}"
+        subject = "Einladung zu Heuhaufen"
+        body = (f"Hallo,\n\nich habe dich zu Heuhaufen eingeladen. Heuhaufen beobachtet eBay-Suchen für dich und "
+                f"meldet sich per Push-Nachricht aufs Handy, wenn etwas unter deinem Höchstpreis auftaucht.\n\n"
+                f"Mit diesem Link legst du dein Konto an (gültig bis {until}, nur einmal):\n{link}\n\n"
+                f"Dafür brauchst du:\n"
+                f"- ein eigenes Konto im eBay Developer Program mit einem Production-Keyset (App ID und Cert ID), "
+                f"Anleitung: {config.REPO_URL}#voraussetzungen\n"
+                f"- die App ntfy auf dem Handy für die Benachrichtigungen\n\nViele Grüße\n{admin}")
+    else:
+        link = f"{_base_url(request)}/zuruecksetzen/{token}"
+        subject = "Neues Passwort für Heuhaufen"
+        body = (f"Hallo {username},\n\nmit diesem Link legst du ein neues Passwort für Heuhaufen fest "
+                f"(gültig bis {until}, nur einmal):\n{link}\n\nDie Zwei-Faktor-Anmeldung ist danach ausgeschaltet. "
+                f"Du kannst sie in den Einstellungen wieder einschalten.\n\nViele Grüße\n{admin}")
+    mailto = None
+    if email:
+        mailto = (f"mailto:{quote(email, safe='@')}?subject={quote(subject, safe='')}"
+                  f"&body={quote(body.replace(chr(10), chr(13) + chr(10)), safe='')}")
+    return {"kind": kind, "email": email, "username": username, "link": link, "until": until,
+            "subject": subject, "body": body, "mailto": mailto}
+
+
+def _users_page(request: Request, created: dict | None = None, errors: dict | None = None,
+                values: dict | None = None, status: int = 200) -> HTMLResponse:
+    users = db.q("SELECT id, username, email, role, active, last_login, created_at, totp_enabled FROM users "
+                 "ORDER BY role = 'admin' DESC, username COLLATE NOCASE")
+    invites = db.q("SELECT id, email, created_at, expires_at FROM user_tokens WHERE kind = 'invite' "
+                   "AND used_at IS NULL ORDER BY created_at DESC")
+    return render(request, "users.html", status_code=status, active="users", users=users, invites=invites,
+                  created=created, errors=errors or {}, values=values or {}, now=time.time(), me=uid(request),
+                  has_app_url=bool((db.get_settings().get("app_url") or "").strip()))
+
+
+def _other_user(request: Request, user_id: int) -> dict | None:
+    """Ein anderes Konto als das eigene, aber nicht das des Admins."""
+    row = db.q1("SELECT * FROM users WHERE id = ?", (user_id,))
+    return row if row and row["id"] != uid(request) and row["role"] != "admin" else None
+
+
+@app.get("/nutzer", response_class=HTMLResponse)
+async def users_page(request: Request):
+    if not _is_admin(request):
+        return not_found(request)
+    return _users_page(request)
+
+
+@app.post("/nutzer/einladen", response_class=HTMLResponse)
+async def invite_user(request: Request):
+    form = await checked_form(request)
+    if not _is_admin(request):
+        return not_found(request)
+    email = str(form.get("email", "")).strip()[:200]
+    error = auth.check_email(email)
+    if error:
+        return _users_page(request, errors={"email": error}, values={"email": email}, status=422)
+    token, expires = auth.create_token("invite", uid(request), email=email)
+    return _users_page(request, created=_mail(request, "invite", token, expires, email))
+
+
+@app.post("/nutzer/einladung/{tid}/neu", response_class=HTMLResponse)
+async def renew_invite(request: Request, tid: int):
+    await checked_form(request)
+    row = db.q1("SELECT * FROM user_tokens WHERE id = ? AND kind = 'invite' AND used_at IS NULL", (tid,))
+    if not _is_admin(request) or not row:
+        return not_found(request)
+    token, expires = auth.create_token("invite", uid(request), email=row["email"])
+    return _users_page(request, created=_mail(request, "invite", token, expires, row["email"]))
+
+
+@app.post("/nutzer/einladung/{tid}/zurueckziehen")
+async def revoke_invite(request: Request, tid: int):
+    await checked_form(request)
+    if not _is_admin(request):
+        return not_found(request)
+    db.ex("DELETE FROM user_tokens WHERE id = ? AND kind = 'invite' AND used_at IS NULL", (tid,))
+    return back("/nutzer", "invite_revoked")
+
+
+@app.post("/nutzer/{user_id}/zuruecksetzen", response_class=HTMLResponse)
+async def reset_link(request: Request, user_id: int):
+    await checked_form(request)
+    user = _other_user(request, user_id) if _is_admin(request) else None
+    if not user:
+        return not_found(request)
+    token, expires = auth.create_token("reset", uid(request), email=user["email"], user_id=user["id"])
+    return _users_page(request, created=_mail(request, "reset", token, expires, user["email"], user["username"]))
+
+
+@app.post("/nutzer/{user_id}/sperren")
+async def lock_user(request: Request, user_id: int):
+    await checked_form(request)
+    user = _other_user(request, user_id) if _is_admin(request) else None
+    if not user:
+        return not_found(request)
+    db.ex("UPDATE users SET active = ? WHERE id = ?", (0 if user["active"] else 1, user["id"]))
+    if user["active"]:
+        db.ex("DELETE FROM sessions WHERE user_id = ?", (user["id"],))   # sofort abmelden
+    return back("/nutzer", "user_locked" if user["active"] else "user_unlocked", anchor="konten")
+
+
+@app.post("/nutzer/{user_id}/loeschen")
+async def delete_user(request: Request, user_id: int):
+    await checked_form(request)
+    user = _other_user(request, user_id) if _is_admin(request) else None
+    if not user:
+        return not_found(request)
+    db.ex("DELETE FROM users WHERE id = ?", (user["id"],))   # Gesuche, Einstellungen, Sitzungen folgen
+    db.ex("DELETE FROM api_usage WHERE user_id = ?", (user["id"],))
+    db.ex("DELETE FROM api_calls WHERE user_id = ?", (user["id"],))
+    return back("/nutzer", "user_deleted", anchor="konten")
+
+
+# ---------------------------------------------------------------- Einladung annehmen, Passwort zurücksetzen
+# Ohne Anmeldung erreichbar (PUBLIC_PREFIXES). Formular-Schutz wie bei der Anmeldung (LOGIN_CSRF_COOKIE).
+
+def _account_form(request: Request, mode: str, token: str, row: dict, errors: dict | None = None,
+                  values: dict | None = None, status: int = 200) -> HTMLResponse:
+    csrf = secrets.token_urlsafe(24)
+    user = db.q1("SELECT username FROM users WHERE id = ?", (row["user_id"],)) if mode == "reset" else None
+    resp = render(request, "account.html", status_code=status, csrf=csrf, mode=mode, token=token, row=row,
+                  username=user["username"] if user else None, errors=errors or {}, values=values or {})
+    set_cookie(resp, request, auth.LOGIN_CSRF_COOKIE, csrf, max_age=3600)
+    return resp
+
+
+def _link_invalid(request: Request) -> HTMLResponse:
+    return render(request, "message.html", status_code=410, heading="Link nicht mehr gültig",
+                  text="Dieser Link ist abgelaufen oder wurde schon benutzt. Bitte um einen neuen.",
+                  link="/login", link_text="Zur Anmeldung")
+
+
+@app.get("/einladung/{token}", response_class=HTMLResponse)
+async def invite_page(request: Request, token: str):
+    row = auth.load_token(token, "invite")
+    return _account_form(request, "invite", token, row) if row else _link_invalid(request)
+
+
+@app.post("/einladung/{token}", response_class=HTMLResponse)
+async def accept_invite(request: Request, token: str):
+    row = auth.load_token(token, "invite")
+    if not row:
+        return _link_invalid(request)
+    form = await request.form()
+    username = str(form.get("username", "")).strip()[:40]
+    password, repeat = str(form.get("password", "")), str(form.get("repeat", ""))
+    if not auth.csrf_ok(form.get("csrf"), request.cookies.get(auth.LOGIN_CSRF_COOKIE)):
+        return _account_form(request, "invite", token, row, {"form": "Das Formular war abgelaufen. Bitte noch einmal."},
+                             {"username": username}, 400)
+    errors = {k: v for k, v in (("username", auth.check_username(username)),
+                                ("email", auth.check_email(row["email"])),
+                                ("password", auth.check_password(password, repeat))) if v}
+    if errors:
+        return _account_form(request, "invite", token, row, errors, {"username": username}, 422)
+    user_id = auth.create_user(username, row["email"], password)
+    auth.use_token(row, user_id)
+    log.info("Konto '%s' über eine Einladung angelegt.", username)
+    return _complete_login(request, user_id, False, "/settings?ok=welcome#ebay")
+
+
+@app.get("/zuruecksetzen/{token}", response_class=HTMLResponse)
+async def reset_page(request: Request, token: str):
+    row = auth.load_token(token, "reset")
+    return _account_form(request, "reset", token, row) if row else _link_invalid(request)
+
+
+@app.post("/zuruecksetzen/{token}", response_class=HTMLResponse)
+async def reset_submit(request: Request, token: str):
+    row = auth.load_token(token, "reset")
+    if not row:
+        return _link_invalid(request)
+    form = await request.form()
+    password, repeat = str(form.get("password", "")), str(form.get("repeat", ""))
+    if not auth.csrf_ok(form.get("csrf"), request.cookies.get(auth.LOGIN_CSRF_COOKIE)):
+        return _account_form(request, "reset", token, row, {"form": "Das Formular war abgelaufen. Bitte noch einmal."},
+                             status=400)
+    error = auth.check_password(password, repeat)
+    if error:
+        return _account_form(request, "reset", token, row, {"password": error}, status=422)
+    auth.reset_password(row["user_id"], password)
+    auth.use_token(row)
+    resp = RedirectResponse("/login?ok=reset", 303)
+    resp.delete_cookie(auth.LOGIN_CSRF_COOKIE, path="/")
+    return resp

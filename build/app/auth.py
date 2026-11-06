@@ -5,6 +5,7 @@ import base64
 import hashlib
 import io
 import logging
+import re
 import secrets
 import time
 
@@ -57,7 +58,9 @@ def verify_password(user: dict | None, password: str) -> bool:
 
 
 def ensure_admin() -> None:
-    existing = db.q1("SELECT id, username FROM users ORDER BY id LIMIT 1")
+    """Beim allerersten Start das Konto des Admins anlegen (ADMIN_USER, ADMIN_PASSWORD).
+    ADMIN_RESET gilt nur für dieses Konto."""
+    existing = db.q1("SELECT id, username FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")
     if existing:
         if config.ADMIN_RESET:
             if len(config.ADMIN_PASSWORD) < MIN_PASSWORD:
@@ -75,9 +78,95 @@ def ensure_admin() -> None:
         password = secrets.token_urlsafe(12)
         log.warning("Kein ADMIN_PASSWORD gesetzt. Erstes Passwort für '%s': %s  (bitte gleich ändern)",
                     config.ADMIN_USER, password)
-    db.ex("INSERT INTO users(username, password_hash, created_at) VALUES (?, ?, ?)",
+    db.ex("INSERT INTO users(username, password_hash, role, created_at) VALUES (?, ?, 'admin', ?)",
           (config.ADMIN_USER, hash_password(password), time.time()))
     log.info("Benutzerkonto '%s' angelegt.", config.ADMIN_USER)
+
+
+# ---------------------------------------------------------------- Konten
+
+INVITE_SECONDS = 7 * 86400      # Einladung gilt eine Woche …
+RESET_SECONDS = 24 * 3600       # … der Link zum Zurücksetzen einen Tag, beide nur einmal
+USERNAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,39}$")
+EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def find_login(name: str) -> dict | None:
+    """Konto zum Anmeldenamen: Benutzername oder E-Mail-Adresse."""
+    name = (name or "").strip()
+    if not name:
+        return None
+    return db.q1("SELECT * FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE "
+                 "ORDER BY username = ? COLLATE NOCASE DESC LIMIT 1", (name, name, name))
+
+
+def check_username(name: str, exclude_id: int | None = None) -> str | None:
+    """Fehlertext oder None."""
+    if not USERNAME.match(name or ""):
+        return "3 bis 40 Zeichen: Buchstaben, Ziffern, Punkt, Binde- oder Unterstrich, ohne Leerzeichen."
+    row = db.q1("SELECT id FROM users WHERE username = ? COLLATE NOCASE", (name,))
+    if row and row["id"] != exclude_id:
+        return "Diesen Benutzernamen gibt es schon."
+    return None
+
+
+def check_email(email: str, exclude_id: int | None = None) -> str | None:
+    if not EMAIL.match(email or ""):
+        return "Bitte eine E-Mail-Adresse wie name@beispiel.de eingeben."
+    row = db.q1("SELECT id FROM users WHERE email = ? COLLATE NOCASE", (email,))
+    if row and row["id"] != exclude_id:
+        return "Für diese Adresse gibt es schon ein Konto."
+    return None
+
+
+def check_password(password: str, repeat: str) -> str | None:
+    if len(password) < MIN_PASSWORD:
+        return f"Mindestens {MIN_PASSWORD} Zeichen."
+    if password != repeat:
+        return "Die beiden Eingaben stimmen nicht überein."
+    return None
+
+
+def create_token(kind: str, created_by: int, email: str | None = None, user_id: int | None = None) -> tuple[str, float]:
+    """Neuer Einladungs- bzw. Zurücksetzen-Link. Ein älterer für dieselbe Adresse bzw. dasselbe Konto
+    wird ungültig. Liefert (Geheimnis für den Link, gültig bis)."""
+    now = time.time()
+    if kind == "invite":
+        db.ex("DELETE FROM user_tokens WHERE kind = 'invite' AND used_at IS NULL AND email = ? COLLATE NOCASE", (email,))
+    else:
+        db.ex("DELETE FROM user_tokens WHERE kind = 'reset' AND used_at IS NULL AND user_id = ?", (user_id,))
+    token = secrets.token_urlsafe(32)
+    expires = now + (INVITE_SECONDS if kind == "invite" else RESET_SECONDS)
+    db.ex("INSERT INTO user_tokens(token_hash, kind, email, user_id, created_by, created_at, expires_at) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?)", (_digest(token), kind, email, user_id, created_by, now, expires))
+    return token, expires
+
+
+def load_token(token: str | None, kind: str) -> dict | None:
+    """Gültiger, noch nicht benutzter Link oder None."""
+    if not token or len(token) > 200:
+        return None
+    row = db.q1("SELECT * FROM user_tokens WHERE token_hash = ? AND kind = ?", (_digest(token), kind))
+    if not row or row["used_at"] or row["expires_at"] < time.time():
+        return None
+    return row
+
+
+def use_token(row: dict, user_id: int | None = None) -> None:
+    db.ex("UPDATE user_tokens SET used_at = ?, user_id = COALESCE(?, user_id) WHERE id = ?",
+          (time.time(), user_id, row["id"]))
+
+
+def create_user(username: str, email: str, password: str) -> int:
+    return db.ex("INSERT INTO users(username, password_hash, email, role, created_at) VALUES (?, ?, ?, 'user', ?)",
+                 (username, hash_password(password), email, time.time()))
+
+
+def reset_password(user_id: int, password: str) -> None:
+    """Neues Passwort, Zwei-Faktor-Anmeldung aus, alle Geräte abgemeldet (Link vom Admin)."""
+    db.ex("UPDATE users SET password_hash = ?, totp_enabled = 0, totp_secret = NULL WHERE id = ?",
+          (hash_password(password), user_id))
+    db.ex("DELETE FROM sessions WHERE user_id = ?", (user_id,))
 
 
 # ---------------------------------------------------------------- Sperre nach Fehlversuchen

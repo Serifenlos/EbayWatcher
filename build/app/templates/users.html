@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% import "includes/ui.html" as ui %}
+{% block title %}Nutzer – {{ app_name }}{% endblock %}
+{% block content %}
+{#
+  Nur für den Admin (main.py: _users_page). Jedes Konto ist völlig getrennt, hier stehen nur die Konten selbst.
+  Heuhaufen verschickt keine E-Mails: Einladung und Zurücksetzen erzeugen einen Link mit fertigem Text.
+#}
+{% set panel = "grid scroll-mt-6 gap-x-14 gap-y-6 border-t border-line py-8 md:grid-cols-[minmax(0,260px)_minmax(0,560px)] md:py-10" %}
+{% set panel_text = "mt-1.5 text-note text-muted" %}
+{% set stack = "grid content-start gap-5.5" %}
+{% set row_class = "grid gap-3 border-b border-line py-4 first:pt-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" %}
+{% set small_button = "inline-flex min-h-9 cursor-pointer items-center rounded-control border border-line bg-surface px-3 text-sm font-medium text-ink no-underline hover:border-control" %}
+
+<section class="mt-9 mb-2">
+  <h1>Nutzer</h1>
+  <p class="mt-1.5 max-w-[62ch] text-muted">Jedes Konto ist völlig getrennt: eigene Gesuche, eigene Einstellungen und eigene eBay-Zugangsdaten. Hier siehst du nur die Konten selbst.</p>
+</section>
+
+{% if created %}
+<section class="{{ panel }}" id="link">
+  <div>
+    <h2>{{ 'Einladung für ' ~ created.email if created.kind == 'invite' else 'Neues Passwort für ' ~ created.username }}</h2>
+    <p class="{{ panel_text }}">Der Link gilt bis {{ created.until }} und nur einmal. Er erscheint nur jetzt; geht er verloren, erzeugst du einfach einen neuen.</p>
+  </div>
+  <div class="{{ stack }}">
+    <div class="grid min-w-0 gap-2">
+      <label class="{{ ui.label() }}" for="mail_text">Text für die E-Mail{% if created.email %} an {{ created.email }}{% endif %}</label>
+      <textarea class="{{ ui.input() }} min-h-80 py-3 leading-normal" id="mail_text" readonly>{{ created.body }}</textarea>
+    </div>
+    <div class="flex flex-wrap items-center gap-2.5">
+      {% if created.mailto %}<a class="{{ ui.button('primary') }}" href="{{ created.mailto }}">Im Mailprogramm öffnen</a>{% endif %}
+      <button class="{{ ui.button() }}" type="button" data-copy="mail_text" hidden>Text kopieren</button>
+      <span class="text-sm font-medium text-accent" data-copy-done hidden>Kopiert</span>
+    </div>
+    <p class="{{ ui.hint() }}">Betreff: {{ created.subject }}</p>
+  </div>
+</section>
+{% endif %}
+
+<section class="{{ panel }}" id="einladen">
+  <div>
+    <h2>Jemanden einladen</h2>
+    <p class="{{ panel_text }}">Heuhaufen schickt selbst keine E-Mails. Du bekommst einen Link mit fertigem Text und verschickst ihn aus deinem Mailprogramm. Die Person legt damit Benutzername und Passwort fest.</p>
+  </div>
+  <form class="{{ stack }}" method="post" action="/nutzer/einladen" novalidate>
+    {{ ui.csrf_field(csrf) }}
+    <div class="grid min-w-0 gap-2">
+      <label class="{{ ui.label() }}" for="email">E-Mail-Adresse</label>
+      <input class="{{ ui.input() }}" id="email" name="email" type="email" value="{{ values.email or '' }}" autocomplete="off" spellcheck="false" {% if errors.email %}aria-invalid="true"{% endif %}>
+      {{ ui.error(errors, 'email') }}
+      {% if not has_app_url %}<p class="{{ ui.hint('warn') }}">Die Adresse von Heuhaufen ist noch nicht eingetragen (<a href="/settings#standort">Einstellungen</a>). Bis dahin enthält der Link die Adresse, über die du gerade angemeldet bist. Die muss die eingeladene Person erreichen können.</p>{% endif %}
+    </div>
+    <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button('primary') }}" type="submit">Einladung erzeugen</button></div>
+  </form>
+</section>
+
+{% if invites %}
+<section class="{{ panel }}" id="einladungen">
+  <div>
+    <h2>Offene Einladungen</h2>
+    <p class="{{ panel_text }}">Noch nicht angenommen. Ein neuer Link macht den alten ungültig.</p>
+  </div>
+  <ul class="grid">
+    {% for i in invites %}
+    <li class="{{ row_class }}">
+      <div class="grid min-w-0 gap-0.5">
+        <span class="font-medium [overflow-wrap:anywhere]">{{ i.email }}</span>
+        <span class="text-meta {{ 'text-over' if i.expires_at < now else 'text-muted' }}">{{ 'Abgelaufen am ' if i.expires_at < now else 'Gültig bis ' }}{{ date_time(i.expires_at) }}</span>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <form method="post" action="/nutzer/einladung/{{ i.id }}/neu">{{ ui.csrf_field(csrf) }}<button class="{{ small_button }}" type="submit">Neuer Link</button></form>
+        <form method="post" action="/nutzer/einladung/{{ i.id }}/zurueckziehen">{{ ui.csrf_field(csrf) }}<button class="{{ small_button }}" type="submit">Zurückziehen</button></form>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="{{ panel }}" id="konten">
+  <div>
+    <h2>Konten</h2>
+    <p class="{{ panel_text }}">Gesperrte Konten können sich nicht anmelden, ihre Gesuche ruhen. Ein Link zum Zurücksetzen setzt ein neues Passwort und schaltet die Zwei-Faktor-Anmeldung aus.</p>
+  </div>
+  <ul class="grid">
+    {% for u in users %}
+    <li class="{{ row_class }}">
+      <div class="grid min-w-0 gap-0.5">
+        <span class="flex flex-wrap items-baseline gap-2">
+          <span class="font-medium">{{ u.username }}</span>
+          {% if u.role == 'admin' %}<span class="rounded-full bg-tile px-2 text-[12.5px] leading-5 font-semibold text-ink-2">Admin</span>{% endif %}
+          {% if not u.active %}<span class="rounded-full bg-over-soft px-2 text-[12.5px] leading-5 font-semibold text-over">Gesperrt</span>{% endif %}
+          {% if u.id == me %}<span class="text-meta text-muted">(du)</span>{% endif %}
+        </span>
+        <span class="text-meta text-muted [overflow-wrap:anywhere]">{{ u.email or 'ohne E-Mail' }} · {{ 'zuletzt angemeldet ' ~ ago(u.last_login, now) if u.last_login else 'noch nie angemeldet' }}{% if u.totp_enabled %} · 2FA an{% endif %}</span>
+      </div>
+      {% if u.id != me and u.role != 'admin' %}
+      <div class="flex flex-wrap gap-2">
+        <form method="post" action="/nutzer/{{ u.id }}/zuruecksetzen">{{ ui.csrf_field(csrf) }}<button class="{{ small_button }}" type="submit">Link zum Zurücksetzen</button></form>
+        <form method="post" action="/nutzer/{{ u.id }}/sperren">{{ ui.csrf_field(csrf) }}<button class="{{ small_button }}" type="submit">{{ 'Sperren' if u.active else 'Entsperren' }}</button></form>
+        <form method="post" action="/nutzer/{{ u.id }}/loeschen" data-confirm="Konto „{{ u.username }}“ mit allen Gesuchen und Einstellungen löschen? Das lässt sich nicht rückgängig machen.">{{ ui.csrf_field(csrf) }}<button class="{{ small_button }} text-over" type="submit">Löschen</button></form>
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

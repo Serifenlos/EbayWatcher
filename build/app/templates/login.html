@@ -12,7 +12,7 @@
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="next" value="{{ next }}">
     <div class="grid gap-2">
-      <label class="{{ ui.label() }}" for="username">Benutzername</label>
+      <label class="{{ ui.label() }}" for="username">Benutzername oder E-Mail</label>
       <input class="{{ ui.input() }}" id="username" name="username" value="{{ username }}" autocomplete="username" autocapitalize="none" spellcheck="false" required {% if not username %}autofocus{% endif %}>
     </div>
     <div class="grid gap-2">

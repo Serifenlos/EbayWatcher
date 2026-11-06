@@ -61,12 +61,15 @@
         {{ ui.error(errors, 'interval_minutes') }}
       </div>
     </div>
+    {# Gilt für die ganze Installation (alle Konten, Einladungslinks), deshalb nur für den Admin #}
+    {% if is_admin %}
     <div class="grid min-w-0 gap-2">
-      <label class="{{ ui.label() }}" for="app_url">Adresse von Heuhaufen <span class="font-normal text-muted">optional</span></label>
+      <label class="{{ ui.label() }}" for="app_url">Adresse von Heuhaufen <span class="font-normal text-muted">optional, für alle Konten</span></label>
       <input class="{{ ui.input() }}" id="app_url" name="app_url" value="{{ s.app_url }}" placeholder="http://192.168.178.20:8765" autocomplete="off" {% if errors.app_url %}aria-invalid="true"{% endif %}>
       <p class="{{ ui.hint() }}">Dann enthält jede Benachrichtigung auch einen Link zurück zu Heuhaufen, das Artikelbild kommt aus dem eigenen Bild-Cache statt von eBay, und es gibt den Knopf „1 Min vorher erinnern“. Das Handy muss diese Adresse erreichen können, sonst fehlen Bild und Knopf.</p>
       {{ ui.error(errors, 'app_url') }}
     </div>
+    {% endif %}
     <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button('primary') }}" type="submit">Speichern</button></div>
   </form>
 </section>
@@ -168,9 +171,18 @@
 <section class="{{ panel }}" id="sicherheit">
   <div>
     <h2>Anmeldung und Sicherheit</h2>
-    <p class="{{ panel_text }}">Angemeldet als {{ user.username }}.</p>
+    <p class="{{ panel_text }}">Angemeldet als {{ user.username }}. Anmelden kannst du dich mit Benutzername oder E-Mail-Adresse.</p>
   </div>
   <div class="{{ stack }}">
+    <form class="grid gap-4" method="post" action="/settings/email" novalidate>
+      {{ ui.csrf_field(csrf) }}
+      <div class="grid min-w-0 gap-2">
+        <label class="{{ ui.label() }}" for="email">E-Mail-Adresse <span class="font-normal text-muted">optional</span></label>
+        <input class="{{ ui.input() }}" id="email" name="email" type="email" value="{{ s.email if s.email is defined else (user.email or '') }}" autocomplete="email" spellcheck="false" {% if errors.email %}aria-invalid="true"{% endif %}>
+        {{ ui.error(errors, 'email') }}
+      </div>
+      <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button() }}" type="submit">Speichern</button></div>
+    </form>
     <form class="grid gap-4" method="post" action="/settings/password" novalidate>
       {{ ui.csrf_field(csrf) }}
       <h3>Passwort ändern</h3>
@@ -296,6 +308,18 @@
 </section>
 {% endfor %}
 
+{% if is_admin %}
+<section class="{{ panel }} xs:hidden" id="nutzer">
+  <div>
+    <h2>Nutzer</h2>
+    <p class="{{ panel_text }}">Andere einladen und ihre Konten verwalten.</p>
+  </div>
+  <div class="{{ stack }}">
+    <p><a class="{{ ui.button() }}" href="/nutzer">Nutzer verwalten</a></p>
+  </div>
+</section>
+{% endif %}
+
 <section class="{{ panel }}" id="info">
   <div>
     <h2>Über Heuhaufen</h2>
@@ -305,7 +329,7 @@
     {% set fact = "flex justify-between gap-4 border-b border-line pb-2.5" %}
     <dl class="grid gap-2.5">
       <div class="{{ fact }}"><dt class="text-muted">Version</dt><dd class="{{ ui.num() }} text-right">{{ app_version }}</dd></div>
-      <div class="{{ fact }}"><dt class="text-muted">Bild-Cache</dt><dd class="{{ ui.num() }} text-right">{{ image_cache.count }} {{ 'Bild' if image_cache.count == 1 else 'Bilder' }}, {{ '%.1f'|format(image_cache.megabytes)|replace('.', ',') }} MB</dd></div>
+      {% if is_admin %}<div class="{{ fact }}"><dt class="text-muted">Bild-Cache</dt><dd class="{{ ui.num() }} text-right">{{ image_cache.count }} {{ 'Bild' if image_cache.count == 1 else 'Bilder' }}, {{ '%.1f'|format(image_cache.megabytes)|replace('.', ',') }} MB</dd></div>{% endif %}
     </dl>
     <p><a href="{{ repo_url }}/tags" target="_blank" rel="noopener noreferrer">Versionen auf GitHub ansehen</a></p>
   </div>

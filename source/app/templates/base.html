@@ -23,6 +23,8 @@
     {% set nav_link = "py-1 text-muted no-underline hover:text-ink aria-[current=page]:font-semibold aria-[current=page]:text-ink" %}
     <a class="{{ nav_link }}" href="/" {% if active == 'searches' %}aria-current="page"{% endif %}>Gesuche</a>
     <a class="{{ nav_link }}" href="/settings" {% if active == 'settings' %}aria-current="page"{% endif %}>Einstellungen</a>
+    {# Nutzer: auf dem Handy über die Einstellungen (sonst wird die Leiste zu breit) #}
+    {% if is_admin %}<a class="{{ nav_link }} max-xs:hidden" href="/nutzer" {% if active == 'users' %}aria-current="page"{% endif %}>Nutzer</a>{% endif %}
     <form method="post" action="/logout">
       {{ ui.csrf_field(csrf) }}
       <button class="cursor-pointer py-1 text-muted hover:text-ink" type="submit">Abmelden</button>

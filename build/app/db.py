@@ -13,6 +13,7 @@ from . import config
 log = logging.getLogger("heuhaufen.db")
 
 SCHEMA = """
+-- Konten. role: admin (wer installiert hat, ADMIN_USER) oder user (eingeladen). active = 0: gesperrt.
 CREATE TABLE IF NOT EXISTS users (
     id              INTEGER PRIMARY KEY,
     username        TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -20,7 +21,25 @@ CREATE TABLE IF NOT EXISTS users (
     totp_secret     TEXT,
     totp_enabled    INTEGER NOT NULL DEFAULT 0,
     totp_last_code  TEXT,
+    email           TEXT,
+    role            TEXT NOT NULL DEFAULT 'user',
+    active          INTEGER NOT NULL DEFAULT 1,
+    last_login      REAL,
     created_at      REAL NOT NULL
+);
+
+-- Einladungen und Links zum Zurücksetzen des Passworts. Gespeichert wird nur der Hash des Links.
+-- invite: email = an wen, user_id = wer sie angenommen hat; reset: user_id = für wen
+CREATE TABLE IF NOT EXISTS user_tokens (
+    id          INTEGER PRIMARY KEY,
+    token_hash  TEXT NOT NULL UNIQUE,
+    kind        TEXT NOT NULL,
+    email       TEXT,
+    user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    created_by  INTEGER,
+    created_at  REAL NOT NULL,
+    expires_at  REAL NOT NULL,
+    used_at     REAL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -35,9 +54,18 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_agent   TEXT
 );
 
+-- Einstellungen der ganzen Installation (GLOBAL_KEYS) …
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT
+);
+
+-- … und je Konto (alles andere: Standort, ntfy, Anzeige, Durchschnittspreis, Zugangsdaten der Plattformen)
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key      TEXT NOT NULL,
+    value    TEXT,
+    PRIMARY KEY (user_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS searches (
@@ -55,6 +83,7 @@ CREATE TABLE IF NOT EXISTS searches (
     interval_minutes    INTEGER,                           -- eigenes Suchintervall, leer: Einstellung
     pickup_mode         TEXT NOT NULL DEFAULT 'radius',    -- radius | all | hide
     platforms           TEXT NOT NULL DEFAULT 'ebay',      -- Plattformen, durch Komma getrennt (plattformen/)
+    user_id             INTEGER REFERENCES users(id) ON DELETE CASCADE,   -- wem das Gesuch gehört
     active              INTEGER NOT NULL DEFAULT 1,
     initialized         INTEGER NOT NULL DEFAULT 0,
     last_run            REAL,
@@ -118,11 +147,13 @@ CREATE TABLE IF NOT EXISTS hidden_items (
 -- Vergleichsangebote für den Durchschnittspreis (siehe market.py). Sie bleiben gespeichert, auch wenn
 -- sie nicht mehr online sind, und bilden so über Monate einen Preisverlauf.
 -- key: search:<Gesuch> | epid:<Katalognummer> | nr:<Artikelnummer>
+-- Die Vergleichsangebote sind für alle Konten gemeinsam; user_id: wer zuletzt abgefragt hat (Tageslimit je Konto).
 CREATE TABLE IF NOT EXISTS market_sources (
     key         TEXT PRIMARY KEY,
     fetched_at  REAL NOT NULL,
     ok          INTEGER NOT NULL DEFAULT 1,
-    last_used   REAL NOT NULL
+    last_used   REAL NOT NULL,
+    user_id     INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS market_items (
@@ -158,20 +189,23 @@ CREATE TABLE IF NOT EXISTS item_details (
 
 """
 
-# Abfragen je Tag und Plattform, dazu dieselben nach Zweck (plattformen/basis.PURPOSES).
-# Eigene Konstanten, weil _migrate die Tabellen aus älteren Versionen (ohne Plattform) neu anlegt.
+# Abfragen je Tag, Konto und Plattform, dazu dieselben nach Zweck (plattformen/basis.PURPOSES). Jedes Konto
+# hat eigene Zugangsdaten und damit ein eigenes Tageskontingent. user_id 0: ohne Konto (alte Zählung, Tests).
+# Eigene Konstanten, weil _migrate die Tabellen aus älteren Versionen neu anlegt.
 API_USAGE = """api_usage (
     day       TEXT NOT NULL,
+    user_id   INTEGER NOT NULL DEFAULT 0,
     platform  TEXT NOT NULL DEFAULT 'ebay',
     calls     INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (day, platform)
+    PRIMARY KEY (day, user_id, platform)
 )"""
 API_CALLS = """api_calls (
     day       TEXT NOT NULL,
+    user_id   INTEGER NOT NULL DEFAULT 0,
     platform  TEXT NOT NULL DEFAULT 'ebay',
     purpose   TEXT NOT NULL,
     calls     INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (day, platform, purpose)
+    PRIMARY KEY (day, user_id, platform, purpose)
 )"""
 SCHEMA += f"CREATE TABLE IF NOT EXISTS {API_USAGE};\nCREATE TABLE IF NOT EXISTS {API_CALLS};\n"
 
@@ -235,8 +269,26 @@ def init() -> None:
     _migrate()
 
 
+def _columns(table: str) -> set[str]:
+    return {r["name"] for r in q(f"PRAGMA table_info({table})")}
+
+
 def _migrate() -> None:
     """Spalten, die nach der ersten Version dazugekommen sind, in bestehenden Datenbanken ergänzen."""
+    # Mehrere Konten (seit Heuhaufen 0.4): das erste Konto ist der Admin, ihm gehört alles Bisherige
+    columns = _columns("users")
+    for name, kind in (("email", "TEXT"), ("role", "TEXT NOT NULL DEFAULT 'user'"),
+                       ("active", "INTEGER NOT NULL DEFAULT 1"), ("last_login", "REAL")):
+        if name not in columns:
+            ex(f"ALTER TABLE users ADD COLUMN {name} {kind}")
+    if not q1("SELECT 1 AS x FROM users WHERE role = 'admin'"):
+        ex("UPDATE users SET role = 'admin' WHERE id = (SELECT MIN(id) FROM users)")
+    ex("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email COLLATE NOCASE) WHERE email IS NOT NULL")
+    if "user_id" not in _columns("searches"):
+        ex("ALTER TABLE searches ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE")
+    if "user_id" not in _columns("market_sources"):
+        ex("ALTER TABLE market_sources ADD COLUMN user_id INTEGER")
+    adopt_owner_data()
     if "interval_minutes" not in {r["name"] for r in q("PRAGMA table_info(searches)")}:
         ex("ALTER TABLE searches ADD COLUMN interval_minutes INTEGER")
     columns = {r["name"] for r in q("PRAGMA table_info(items)")}
@@ -254,8 +306,11 @@ def _migrate() -> None:
     for table, column in (("searches", "platforms"), ("items", "platform"), ("hidden_items", "platform")):
         if column not in {r["name"] for r in q(f"PRAGMA table_info({table})")}:
             ex(f"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT 'ebay'")
-    # Abfragen je Plattform: Tabellen mit neuem Schlüssel anlegen, die bisherigen Zahlen gelten für eBay
-    if "platform" not in {r["name"] for r in q("PRAGMA table_info(api_usage)")}:
+    # Abfragen je Konto und Plattform: Tabellen mit neuem Schlüssel anlegen. Bisherige Zahlen gelten für eBay
+    # (Tabellen vor 0.3 hatten keine Plattform) und für den Admin.
+    if "user_id" not in _columns("api_usage"):
+        platform = "platform" if "platform" in _columns("api_usage") else "'ebay'"
+        owner = owner_id() or 0
         with _lock:
             _conn.executescript(f"""
                 BEGIN;
@@ -263,8 +318,10 @@ def _migrate() -> None:
                 ALTER TABLE api_calls RENAME TO api_calls_alt;
                 CREATE TABLE {API_USAGE};
                 CREATE TABLE {API_CALLS};
-                INSERT INTO api_usage(day, platform, calls) SELECT day, 'ebay', calls FROM api_usage_alt;
-                INSERT INTO api_calls(day, platform, purpose, calls) SELECT day, 'ebay', purpose, calls FROM api_calls_alt;
+                INSERT INTO api_usage(day, user_id, platform, calls)
+                    SELECT day, {owner}, {platform}, calls FROM api_usage_alt;
+                INSERT INTO api_calls(day, user_id, platform, purpose, calls)
+                    SELECT day, {owner}, {platform}, purpose, calls FROM api_calls_alt;
                 DROP TABLE api_usage_alt;
                 DROP TABLE api_calls_alt;
                 COMMIT;
@@ -300,20 +357,62 @@ def ex(sql: str, params: tuple | list = ()) -> int:
 
 # ---------------------------------------------------------------- Einstellungen
 
-def get_settings() -> dict[str, str]:
-    s = dict(DEFAULTS)
+# Gelten für die ganze Installation; alles andere gehört zum Konto (user_settings)
+GLOBAL_KEYS = frozenset({"app_url", "image_secret"})
+
+
+def owner_id() -> int | None:
+    """Das Konto des Admins (wer Heuhaufen installiert hat)."""
+    try:
+        row = q1("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")
+    except sqlite3.OperationalError:   # Datenbank vor 0.4, noch ohne Spalte role
+        row = q1("SELECT MIN(id) AS id FROM users")
+    return row["id"] if row and row["id"] is not None else None
+
+
+def adopt_owner_data() -> None:
+    """Was noch keinem Konto gehört, dem Admin geben: Gesuche ohne Konto und Einstellungen, die bis 0.3
+    für die ganze Installation galten (Standort, ntfy, eBay-Zugangsdaten …). Ohne Konto: nichts zu tun."""
+    owner = owner_id()
+    if owner is None:
+        return
+    ex("UPDATE searches SET user_id = ? WHERE user_id IS NULL", (owner,))
+    marks = ",".join("?" * len(GLOBAL_KEYS))
+    rows = q(f"SELECT key, value FROM settings WHERE key NOT IN ({marks})", tuple(GLOBAL_KEYS))
+    for row in rows:
+        ex("INSERT INTO user_settings(user_id, key, value) VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO NOTHING",
+           (owner, row["key"], row["value"]))
+    if rows:
+        ex(f"DELETE FROM settings WHERE key NOT IN ({marks})", tuple(GLOBAL_KEYS))
+
+
+def get_settings(user_id: int | None = None) -> dict:
+    """Einstellungen eines Kontos: Vorgaben, darüber die der Installation, darüber die des Kontos.
+    Ohne user_id: das Konto des Admins (so verhält sich Heuhaufen wie mit nur einem Konto).
+    _user_id steht mit drin, damit Plattformen die Abfragen dem Konto zuordnen können."""
+    s: dict = dict(DEFAULTS)
     for row in q("SELECT key, value FROM settings"):
         s[row["key"]] = row["value"] if row["value"] is not None else ""
+    uid = user_id if user_id is not None else owner_id()
+    if uid is not None:
+        for row in q("SELECT key, value FROM user_settings WHERE user_id = ?", (uid,)):
+            s[row["key"]] = row["value"] if row["value"] is not None else ""
+    s["_user_id"] = uid
     return s
 
 
-def set_settings(values: dict[str, object]) -> None:
+def set_settings(values: dict[str, object], user_id: int | None = None) -> None:
+    """Speichert Einstellungen. GLOBAL_KEYS für die Installation, alles andere für das Konto
+    (ohne user_id: Konto des Admins; gibt es noch keins, für die Installation)."""
+    uid = user_id if user_id is not None else owner_id()
     for key, value in values.items():
-        ex(
-            "INSERT INTO settings(key, value) VALUES(?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (key, "" if value is None else str(value)),
-        )
+        value = "" if value is None else str(value)
+        if key in GLOBAL_KEYS or uid is None:
+            ex("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+               (key, value))
+        else:
+            ex("INSERT INTO user_settings(user_id, key, value) VALUES(?, ?, ?) "
+               "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value", (uid, key, value))
 
 
 def setting_int(settings: dict[str, str], key: str, fallback: int) -> int:
@@ -342,26 +441,28 @@ def _today(days_back: int = 0) -> str:
     return (datetime.now(ZoneInfo(config.TZ)).date() - timedelta(days=days_back)).isoformat()
 
 
-def count_api_call(purpose: str = "suche", n: int = 1, platform: str = "ebay") -> None:
-    day = _today()
+def count_api_call(purpose: str = "suche", n: int = 1, platform: str = "ebay", user_id: int | None = None) -> None:
+    day, uid = _today(), user_id or 0
     with _lock:
-        ex("INSERT INTO api_usage(day, platform, calls) VALUES(?, ?, ?) "
-           "ON CONFLICT(day, platform) DO UPDATE SET calls = calls + ?", (day, platform, n, n))
-        ex("INSERT INTO api_calls(day, platform, purpose, calls) VALUES(?, ?, ?, ?) "
-           "ON CONFLICT(day, platform, purpose) DO UPDATE SET calls = calls + ?", (day, platform, purpose, n, n))
+        ex("INSERT INTO api_usage(day, user_id, platform, calls) VALUES(?, ?, ?, ?) "
+           "ON CONFLICT(day, user_id, platform) DO UPDATE SET calls = calls + ?", (day, uid, platform, n, n))
+        ex("INSERT INTO api_calls(day, user_id, platform, purpose, calls) VALUES(?, ?, ?, ?, ?) "
+           "ON CONFLICT(day, user_id, platform, purpose) DO UPDATE SET calls = calls + ?",
+           (day, uid, platform, purpose, n, n))
 
 
-def api_calls_today(platform: str = "ebay") -> int:
-    row = q1("SELECT calls FROM api_usage WHERE day = ? AND platform = ?", (_today(), platform))
+def api_calls_today(platform: str = "ebay", user_id: int | None = None) -> int:
+    row = q1("SELECT calls FROM api_usage WHERE day = ? AND platform = ? AND user_id = ?",
+             (_today(), platform, user_id or 0))
     return row["calls"] if row else 0
 
 
-def api_calls_by_purpose(days_back: int = 0, platform: str = "ebay") -> dict[str, int]:
+def api_calls_by_purpose(days_back: int = 0, platform: str = "ebay", user_id: int | None = None) -> dict[str, int]:
     """Abfragen eines Tages nach Zweck; „ohne Zuordnung“ sind Abfragen von vor dem Update."""
-    day = _today(days_back)
-    result = {r["purpose"]: r["calls"] for r in q("SELECT purpose, calls FROM api_calls WHERE day = ? AND platform = ?",
-                                                   (day, platform))}
-    row = q1("SELECT calls FROM api_usage WHERE day = ? AND platform = ?", (day, platform))
+    day, uid = _today(days_back), user_id or 0
+    result = {r["purpose"]: r["calls"] for r in q(
+        "SELECT purpose, calls FROM api_calls WHERE day = ? AND platform = ? AND user_id = ?", (day, platform, uid))}
+    row = q1("SELECT calls FROM api_usage WHERE day = ? AND platform = ? AND user_id = ?", (day, platform, uid))
     rest = (row["calls"] if row else 0) - sum(result.values())
     if rest > 0:
         result["ohne"] = rest
@@ -385,6 +486,7 @@ def prune() -> None:
         "SELECT 1 FROM items i WHERE i.search_id = hidden_items.search_id AND i.item_id = hidden_items.item_id)",
         (now - 30 * 86400,),
     )
+    ex("DELETE FROM user_tokens WHERE expires_at < ?", (now - 30 * 86400,))
     ex("DELETE FROM api_usage WHERE day < date('now', '-60 day')")
     ex("DELETE FROM api_calls WHERE day < date('now', '-60 day')")
     ex("DELETE FROM item_details WHERE item_id NOT IN (SELECT item_id FROM items) "

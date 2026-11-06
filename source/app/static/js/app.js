@@ -768,4 +768,39 @@
 
   formatInputs.forEach(function (i) { i.addEventListener("change", syncFormat); });
   if (formatInputs.length) syncFormat();
+
+  // ------------------------------------------------------------------
+  // Nutzer: Text der Einladung kopieren (Knopf erscheint nur mit JavaScript)
+
+  function copyText(field) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(field.value);
+    }
+    return new Promise(function (resolve, reject) {   // http im Heimnetz: Clipboard-API fehlt
+      field.focus();
+      field.select();
+      if (document.execCommand("copy")) resolve(); else reject(new Error("copy"));
+    });
+  }
+
+  document.querySelectorAll("[data-copy]").forEach(function (button) {
+    var field = document.getElementById(button.dataset.copy);
+    var done = button.parentNode.querySelector("[data-copy-done]");
+    if (!field) return;
+    button.hidden = false;
+    button.addEventListener("click", function () {
+      copyText(field)
+        .then(function () {
+          if (done) {
+            done.hidden = false;
+            window.setTimeout(function () { done.hidden = true; }, 2500);
+          }
+        })
+        .catch(function (error) {
+          console.info("Kopieren nicht möglich, Text ist markiert:", error);
+          field.focus();
+          field.select();
+        });
+    });
+  });
 })();

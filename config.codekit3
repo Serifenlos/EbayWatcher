@@ -278,6 +278,14 @@
       "sC" : 3,
       "tS" : 0
     },
+    "\/source\/app\/templates\/account.html" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 0,
+      "oAP" : "\/build\/app\/templates\/account.html",
+      "oF" : 0
+    },
     "\/source\/app\/templates\/base.html" : {
       "cB" : 0,
       "ft" : 8192,
@@ -382,6 +390,14 @@
       "oAP" : "\/build\/app\/templates\/twofactor.html",
       "oF" : 0
     },
+    "\/source\/app\/templates\/users.html" : {
+      "cB" : 0,
+      "ft" : 8192,
+      "hM" : 0,
+      "oA" : 0,
+      "oAP" : "\/build\/app\/templates\/users.html",
+      "oF" : 0
+    },
     "\/source\/app\/util.py" : {
       "cB" : 0,
       "ft" : 8192,
@@ -425,7 +441,7 @@
     "displayValueWasSetByUser" : 0,
     "iconImageName" : "brackets-pale",
     "iconImageWasSetByUser" : 0,
-    "lastBuiltDate" : 815698796.59238803
+    "lastBuiltDate" : 815701388.91460896
   },
   "projectSettings" : {
     "abortBuildOnError" : 1,

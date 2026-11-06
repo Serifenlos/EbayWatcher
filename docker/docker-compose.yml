@@ -4,7 +4,7 @@
 #   Docker Compose: neben dieser Datei "docker compose up -d"
 #   Portainer:      Stacks > Add stack > Web editor, diesen Inhalt einfügen, "Deploy the stack"
 # Die eBay-Zugangsdaten (App ID und Cert ID) trägst du nach dem ersten Login unter
-# Einstellungen > eBay-Verbindung ein.
+# Einstellungen > eBay-Verbindung ein. Weitere Personen lädst du danach unter Nutzer ein.
 services:
   heuhaufen:
     image: ghcr.io/serifenlos/heuhaufen:latest
@@ -13,7 +13,7 @@ services:
     ports:
       - "8765:8000"                    # links der Port im Heimnetz, bei Bedarf ändern
     environment:
-      ADMIN_USER: "admin"
+      ADMIN_USER: "admin"                                # Benutzername des Admins
       ADMIN_PASSWORD: "PASSWORT-FUER-DEN-ERSTEN-LOGIN"   # mindestens 10 Zeichen, gilt nur beim allerersten Start
       TZ: "Europe/Berlin"
       COOKIE_SECURE: "auto"

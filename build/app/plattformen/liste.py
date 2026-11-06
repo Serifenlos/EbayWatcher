@@ -47,8 +47,8 @@ async def close() -> None:
 
 # ---------------------------------------------------------------- Zugangsdaten in den Einstellungen
 
-def save_credentials(p: Plattform, form: dict) -> None:
-    """Felder aus dem Formular speichern. Geheime nur, wenn etwas eingetragen ist (leer = unverändert)."""
+def save_credentials(p: Plattform, form: dict, user_id: int | None = None) -> None:
+    """Felder aus dem Formular für ein Konto speichern. Geheime nur, wenn etwas eingetragen ist (leer = unverändert)."""
     values = {}
     for c in p.credentials:
         value = str(form.get(c.key, "")).strip()
@@ -57,7 +57,7 @@ def save_credentials(p: Plattform, form: dict) -> None:
                 values[c.key] = geheim.encrypt(value)
         else:
             values[c.key] = value
-    db.set_settings(values)
+    db.set_settings(values, user_id)
 
 
 def secret_hint(settings: dict, key: str) -> str | None:
@@ -70,7 +70,7 @@ def secret_hint(settings: dict, key: str) -> str | None:
 
 def adopt_from_environment(env: dict[str, str], log) -> None:
     """Einmalig: eBay-Zugangsdaten aus der Docker-Konfiguration (EBAY_CLIENT_ID, EBAY_CLIENT_SECRET)
-    in die Einstellungen übernehmen. Danach gelten nur noch die Einstellungen."""
+    in die Einstellungen des Admins übernehmen. Danach gelten nur noch die Einstellungen."""
     client_id, secret = env.get("EBAY_CLIENT_ID", "").strip(), env.get("EBAY_CLIENT_SECRET", "").strip()
     if not (client_id and secret):
         return

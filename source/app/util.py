@@ -69,6 +69,13 @@ def local_time(ts: float | None) -> str:
     return f"{WEEKDAYS[d.weekday()]}, {d:%d.%m.} um {d:%H:%M}"
 
 
+def date_time(ts: float | None) -> str:
+    """z. B. „14.11.2026, 23:10“"""
+    if not ts:
+        return ""
+    return f"{datetime.fromtimestamp(ts, ZoneInfo(config.TZ)):%d.%m.%Y, %H:%M}"
+
+
 def ago(ts: float | None, now: float | None = None) -> str:
     if not ts:
         return "noch nie"

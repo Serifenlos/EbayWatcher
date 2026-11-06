@@ -5,7 +5,7 @@ Heuhaufen überwacht eBay-Gesuche und schickt über [ntfy](https://ntfy.sh) eine
 - wenn eine Auktion kurz vor Ende (Standard: 10 Minuten) noch unter deinem Höchstpreis liegt; über den Knopf „1 Min vorher erinnern“ kommt eine Minute vor Schluss ein zweiter, dringender Hinweis, falls der Preis dann noch passt,
 - wenn ein Sofortkauf-Angebot unter deinem Höchstpreis neu auftaucht.
 
-Es nutzt die offizielle eBay Browse API und läuft als einzelner Docker-Container ohne weitere Dienste, zum Beispiel auf einem NAS.
+Es nutzt die offizielle eBay Browse API und läuft als einzelner Docker-Container ohne weitere Dienste, zum Beispiel auf einem NAS. Auf derselben Installation können mehrere Personen völlig getrennt ihre eigenen Gesuche verwalten.
 
 > Heuhaufen ist noch in Entwicklung (Version 0.x). Neue Versionen und Änderungen stehen unter [Releases](https://github.com/Serifenlos/Heuhaufen/releases).
 
@@ -20,14 +20,15 @@ Es nutzt die offizielle eBay Browse API und läuft als einzelner Docker-Containe
 - Zustand jedes Angebots im Wortlaut von eBay (zum Beispiel „Gebraucht“ oder „Als Ersatzteil/defekt“), in der Liste und in den Benachrichtigungen
 - Bilder-Galerie: Ein Klick aufs Vorschaubild oder den Titel zeigt alle Bilder des Angebots groß (mit [PhotoSwipe](https://photoswipe.com)), daneben Preis, Zustand, Gebote, Artikelmerkmale und die Beschreibung des Verkäufers; zu eBay geht es über den Knopf in der Galerie oder mit gedrückter Cmd-/Strg-Taste
 - Durchschnittspreis (Ø) neben jedem Angebot: Vergleich mit den Sofortkauf-Angeboten desselben Produkts der letzten Monate, auf Wunsch getrennt nach neu und gebraucht; deutlich günstigere Angebote sind grün markiert
-- Sicherer Login: Argon2-Passwort-Hash, Sperre nach Fehlversuchen, „Angemeldet bleiben“ für 3 Monate, optional Zwei-Faktor per Authenticator-App, Übersicht und Abmeldung aller Geräte
+- Mehrere Konten: Wer Heuhaufen installiert, ist Admin und lädt weitere Personen per Link ein. Jedes Konto hat eigene Gesuche, eigene Einstellungen und eigene eBay-Zugangsdaten
+- Sicherer Login mit Benutzername oder E-Mail-Adresse: Argon2-Passwort-Hash, Sperre nach Fehlversuchen, „Angemeldet bleiben“ für 3 Monate, optional Zwei-Faktor per Authenticator-App, Übersicht und Abmeldung aller Geräte
 
 So arbeitet Heuhaufen: Es sucht im eingestellten Intervall (Standard 15 Minuten, pro Gesuch änderbar) nach neuen Angeboten und merkt sich jede Auktion mit ihrer Endzeit. Genau X Minuten vor Ende fragt es den aktuellen Preis einmal ab und meldet sich, wenn er unter deinem Limit liegt. Dadurch braucht es nur wenige API-Abfragen.
 
 ## Voraussetzungen
 
 - **Docker mit Docker Compose**, direkt oder über Portainer. Das Image gibt es für x86-64 (`linux/amd64`), nicht für ARM-Geräte wie den Raspberry Pi.
-- **Ein Konto im [eBay Developer Program](https://developer.ebay.com)** mit einem *Production*-Keyset. Daraus brauchst du die **App ID** und die **Cert ID**; du trägst sie nach dem ersten Login in den Einstellungen ein. Heuhaufen liest nur öffentliche Suchergebnisse; ein Login mit deinem eBay-Konto ist nicht nötig.
+- **Ein Konto im [eBay Developer Program](https://developer.ebay.com)** mit einem *Production*-Keyset. Daraus brauchst du die **App ID** und die **Cert ID**; du trägst sie nach dem ersten Login in den Einstellungen ein. Jede Person mit eigenem Konto in Heuhaufen braucht dafür ein eigenes Keyset. Heuhaufen liest nur öffentliche Suchergebnisse; ein Login mit deinem eBay-Konto ist nicht nötig.
 - **Ein ntfy-Server und die ntfy-App** auf dem Handy. Das kann eine eigene Instanz sein oder der öffentliche Server `https://ntfy.sh`.
 - Heuhaufen ist auf **eBay.de** ausgelegt: Lieferung nach Deutschland, deutsche Postleitzahlen, Preise in Euro.
 
@@ -73,6 +74,18 @@ Ist Port 8765 schon belegt, in der Compose-Datei bei `8765:8000` die linke Zahl 
 
 `ADMIN_PASSWORD` wird nur beim allerersten Start verwendet. Später änderst du das Passwort in den Einstellungen.
 
+## Weitere Personen einladen
+
+Nur der Admin (das Konto aus `ADMIN_USER`) kann einladen, unter **Nutzer** (auf dem Handy: *Einstellungen → Nutzer*).
+
+1. E-Mail-Adresse eintragen und **Einladung erzeugen**. Heuhaufen verschickt selbst keine E-Mails: Du bekommst einen Link mit fertigem Text und schickst ihn über **Im Mailprogramm öffnen** oder per Kopieren aus deinem eigenen Mailprogramm.
+2. Mit dem Link legt die Person Benutzernamen und Passwort fest. Er gilt 7 Tage und nur einmal; ein neuer Link macht den alten ungültig.
+3. Danach trägt sie in ihren Einstellungen ihre eigenen eBay-Zugangsdaten und ntfy ein.
+
+Damit der Link von außen funktioniert, trage unter *Einstellungen → Standort und Suche* die **Adresse von Heuhaufen** ein, so wie die eingeladene Person sie erreicht. Sonst enthält der Link die Adresse, über die du gerade angemeldet bist.
+
+Die Konten sind völlig getrennt. Auch der Admin sieht nur die Konten selbst (Benutzername, E-Mail-Adresse, letzte Anmeldung), keine Gesuche oder Einstellungen. Unter **Nutzer** kann er ein Konto sperren (Anmeldung nicht möglich, Gesuche ruhen), löschen (mit allen Gesuchen und Einstellungen) oder einen Link zum Zurücksetzen des Passworts erzeugen.
+
 ## Updates
 
 Mit Docker Compose:
@@ -83,7 +96,7 @@ docker compose pull && docker compose up -d
 
 In Portainer den Stack öffnen, **Update the stack** wählen und dabei das erneute Laden des Images aktivieren.
 
-Deine Gesuche und Einstellungen bleiben im Datenordner erhalten. Was sich geändert hat, steht unter [Releases](https://github.com/Serifenlos/Heuhaufen/releases). Die laufende Version zeigt Heuhaufen unter *Einstellungen → Über Heuhaufen*.
+Deine Gesuche und Einstellungen bleiben im Datenordner erhalten. Mit dem Update auf Version 0.4 (mehrere Konten) gehört alles Bisherige automatisch dem Admin. Was sich geändert hat, steht unter [Releases](https://github.com/Serifenlos/Heuhaufen/releases). Die laufende Version zeigt Heuhaufen unter *Einstellungen → Über Heuhaufen*.
 
 Welche Version du bekommst, legst du über den Image-Tag in der Compose-Datei fest:
 
@@ -114,30 +127,32 @@ Bei einem öffentlichen ntfy-Server wie `ntfy.sh` kann jeder mitlesen, der den T
 
 ## Passwort vergessen
 
-In der Compose-Datei `ADMIN_PASSWORD` auf ein neues Passwort setzen (mindestens 10 Zeichen), die Zeile `ADMIN_RESET: "true"` einkommentieren und den Container neu starten (`docker compose up -d` bzw. in Portainer **Update the stack**). Beim Start wird das Passwort zurückgesetzt, die Zwei-Faktor-Anmeldung ausgeschaltet und alle Geräte werden abgemeldet. Danach `ADMIN_RESET` wieder entfernen.
+Für eingeladene Konten erzeugt der Admin unter **Nutzer** einen **Link zum Zurücksetzen** (24 Stunden gültig, nur einmal). Damit legt die Person ein neues Passwort fest; die Zwei-Faktor-Anmeldung ist danach aus und alle Geräte sind abgemeldet.
+
+Für das Konto des Admins: In der Compose-Datei `ADMIN_PASSWORD` auf ein neues Passwort setzen (mindestens 10 Zeichen), die Zeile `ADMIN_RESET: "true"` einkommentieren und den Container neu starten (`docker compose up -d` bzw. in Portainer **Update the stack**). Beim Start wird das Passwort zurückgesetzt, die Zwei-Faktor-Anmeldung ausgeschaltet und alle Geräte werden abgemeldet. Danach `ADMIN_RESET` wieder entfernen.
 
 ## Umgebungsvariablen
 
 | Variable | Standard | Bedeutung |
 | --- | --- | --- |
-| `ADMIN_USER` | `admin` | Benutzername beim ersten Start |
+| `ADMIN_USER` | `admin` | Benutzername des Admins beim ersten Start |
 | `ADMIN_PASSWORD` | zufällig | Passwort beim ersten Start; fehlt es, steht ein zufälliges im Container-Log |
-| `ADMIN_RESET` | – | `true` setzt beim Start das Passwort auf `ADMIN_PASSWORD` zurück und schaltet 2FA ab |
+| `ADMIN_RESET` | – | `true` setzt beim Start das Passwort des Admins auf `ADMIN_PASSWORD` zurück und schaltet 2FA ab |
 | `PUID` / `PGID` | `1000` | Benutzer und Gruppe, denen der Datenordner gehört. Auf Synology meist `1026` und `100`; per SSH zeigt `id` deine Werte |
 | `TZ` | `Europe/Berlin` | Zeitzone für die Anzeige |
 | `COOKIE_SECURE` | `auto` | `true` erzwingt Secure-Cookies, `auto` setzt sie nur bei HTTPS |
-| `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` | – | nicht mehr nötig: Die eBay-Zugangsdaten stehen in den Einstellungen. Sind sie hier noch gesetzt, übernimmt Heuhaufen sie beim Start einmal dorthin |
+| `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` | – | nicht mehr nötig: Die eBay-Zugangsdaten stehen in den Einstellungen. Sind sie hier noch gesetzt, übernimmt Heuhaufen sie beim Start einmal in die Einstellungen des Admins |
 
 Den Datenordner legst du in der Compose-Datei bei `volumes` fest (links der Ordner auf dem Server).
 
 ## Gut zu wissen
 
-- **eBay begrenzt die Abfragen pro Tag** (für die Browse API standardmäßig 5.000). Wie viele heute verbraucht sind und wofür (Suche, Endspurt, Erinnerung, Durchschnittspreis, Galerie), zeigt Heuhaufen unter *Einstellungen → eBay-Verbindung*. Seiten anschauen kostet keine Abfragen. Heuhaufen spart von selbst: Bei „Auktion und Sofortkauf“ reicht eine Abfrage für beide, solange es höchstens 200 Treffer gibt, und Abholangebote im Umkreis sucht es höchstens einmal pro Stunde. Bei vielen Gesuchen hilft ein längeres Suchintervall, für einzelne Gesuche unter *Weitere Optionen*. Bei reinen Auktionen reichen meist 60 Minuten, weil Heuhaufen jede gemerkte Auktion kurz vor Ende ohnehin eigens prüft. Die Galerie fragt beim Öffnen einmal nach Beschreibung und Geboten, für dasselbe Angebot höchstens alle 10 Minuten.
-- **Durchschnittspreis:** Verkaufte Preise gibt die eBay-API nicht heraus. Der Ø ist deshalb der Median der Sofortkauf-Angebote desselben Produkts, also ein Angebotspreis. Heuhaufen merkt sich die Angebote, die es dabei sieht, und zählt alle, die im eingestellten Zeitraum (Vorgabe 6 Monate) zu sehen waren, jedes nur einmal. So wächst der Vergleich mit der Zeit, ohne zusätzliche Abfragen. Angebote, die vor ihrem Ende verschwinden, weist Heuhaufen als vermutlich verkauft aus. Als dasselbe Produkt gelten Angebote mit gleicher eBay-Katalognummer, gleicher Artikelnummer im Titel (etwa `87 01 250` oder `576982`) oder gleichem Modell und ähnlichem Titel (etwa „1220E“, aber nicht „1260E + 1220E“), und zwar nur mit derselben Stückzahl: ein „2er Set“ wird nicht mit Einzelgeräten verglichen. Gibt es weniger als drei Vergleichsangebote oder liegen ihre Preise beim Titelvergleich weit auseinander, steht kein Ø da. Dafür braucht Heuhaufen pro Gesuch eine Abfrage am Tag und für Angebote mit Artikel- oder Katalognummer gezielte Abfragen, deren Zahl pro Tag du unter *Einstellungen → Durchschnittspreis* begrenzt.
-- **Knöpfe in der Benachrichtigung:** „1 Min vorher erinnern“ erscheint nur, wenn unter *Einstellungen → Standort und Suche* die **Adresse von Heuhaufen** eingetragen ist. Beim Tippen schickt das Handy eine Anfrage an diese Adresse, es muss sie also erreichen können.
+- **eBay begrenzt die Abfragen pro Tag** (für die Browse API standardmäßig 5.000), und zwar je Keyset. Weil jedes Konto eigene Zugangsdaten hat, hat auch jedes sein eigenes Tageslimit. Wie viele heute verbraucht sind und wofür (Suche, Endspurt, Erinnerung, Durchschnittspreis, Galerie), zeigt Heuhaufen unter *Einstellungen → eBay-Verbindung*. Seiten anschauen kostet keine Abfragen. Heuhaufen spart von selbst: Bei „Auktion und Sofortkauf“ reicht eine Abfrage für beide, solange es höchstens 200 Treffer gibt, und Abholangebote im Umkreis sucht es höchstens einmal pro Stunde. Bei vielen Gesuchen hilft ein längeres Suchintervall, für einzelne Gesuche unter *Weitere Optionen*. Bei reinen Auktionen reichen meist 60 Minuten, weil Heuhaufen jede gemerkte Auktion kurz vor Ende ohnehin eigens prüft. Die Galerie fragt beim Öffnen einmal nach Beschreibung und Geboten, für dasselbe Angebot höchstens alle 10 Minuten.
+- **Durchschnittspreis:** Verkaufte Preise gibt die eBay-API nicht heraus. Der Ø ist deshalb der Median der Sofortkauf-Angebote desselben Produkts, also ein Angebotspreis. Heuhaufen merkt sich die Angebote, die es dabei sieht, und zählt alle, die im eingestellten Zeitraum (Vorgabe 6 Monate) zu sehen waren, jedes nur einmal. So wächst der Vergleich mit der Zeit, ohne zusätzliche Abfragen. Angebote, die vor ihrem Ende verschwinden, weist Heuhaufen als vermutlich verkauft aus. Als dasselbe Produkt gelten Angebote mit gleicher eBay-Katalognummer, gleicher Artikelnummer im Titel (etwa `87 01 250` oder `576982`) oder gleichem Modell und ähnlichem Titel (etwa „1220E“, aber nicht „1260E + 1220E“), und zwar nur mit derselben Stückzahl: ein „2er Set“ wird nicht mit Einzelgeräten verglichen. Gibt es weniger als drei Vergleichsangebote oder liegen ihre Preise beim Titelvergleich weit auseinander, steht kein Ø da. Dafür braucht Heuhaufen pro Gesuch eine Abfrage am Tag und für Angebote mit Artikel- oder Katalognummer gezielte Abfragen, deren Zahl pro Tag du unter *Einstellungen → Durchschnittspreis* begrenzt. Die gesammelten Vergleichsangebote nutzen alle Konten gemeinsam; die Abfragen zählen bei dem Konto, dessen Gesuch sie braucht.
+- **Knöpfe in der Benachrichtigung:** „1 Min vorher erinnern“ erscheint nur, wenn unter *Einstellungen → Standort und Suche* die **Adresse von Heuhaufen** eingetragen ist (das kann nur der Admin, sie gilt für alle Konten). Beim Tippen schickt das Handy eine Anfrage an diese Adresse, es muss sie also erreichen können.
 - **Bilder:** Jedes Artikelbild lädt Heuhaufen nur einmal bei eBay und speichert es im Datenordner unter `cache/bilder`, für die Galerie in großer Auflösung beim ersten Öffnen. Das kostet keine API-Abfragen, die Bildadressen kommen schon mit der Suche. Bilder, die 14 Tage nicht angezeigt wurden, löscht es von selbst, und insgesamt belegt der Ordner höchstens etwa 500 MB. Ist unter *Einstellungen → Standort und Suche* die **Adresse von Heuhaufen** eingetragen, kommen auch die Bilder in den Benachrichtigungen aus diesem Cache. Das Handy muss diese Adresse dann erreichen können, sonst fehlt das Bild in der Benachrichtigung.
 - **Zugangsdaten und Backup:** Die Cert ID speichert Heuhaufen verschlüsselt in der Datenbank. Der Schlüssel liegt daneben im Datenordner in der Datei `geheim.key`. Sichere immer den ganzen Datenordner; ohne `geheim.key` musst du die Cert ID neu eintragen.
-- **Datenschutz:** Heuhaufen speichert nur Artikelnummer, Titel, Artikelbilder, Zustand, Preise, Versandkosten, Standort-Land und Endzeit der gefundenen Angebote, für die Galerie außerdem Beschreibung, Artikelmerkmale und die Zahl der Gebote und Bieter. Daten über Verkäufer oder Käufer werden nicht gespeichert. Beendete Angebote werden nach sieben Tagen gelöscht.
+- **Datenschutz:** Heuhaufen speichert nur Artikelnummer, Titel, Artikelbilder, Zustand, Preise, Versandkosten, Standort-Land und Endzeit der gefundenen Angebote, für die Galerie außerdem Beschreibung, Artikelmerkmale und die Zahl der Gebote und Bieter. Daten über Verkäufer oder Käufer werden nicht gespeichert. Beendete Angebote werden nach sieben Tagen gelöscht. Von den Personen mit Konto speichert Heuhaufen nur Benutzername, E-Mail-Adresse, Passwort-Hash und die letzte Anmeldung; von Einladungs-Links nur einen Hash.
 
 ## Fremdsoftware
 

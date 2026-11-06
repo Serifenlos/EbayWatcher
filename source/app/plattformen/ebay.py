@@ -58,6 +58,7 @@ class EbayClient:
     def __init__(self) -> None:
         self._client_id = ""
         self._secret = ""
+        self.user_id: int | None = None   # wessen Abfragen gezählt werden
         self._token: str | None = None
         self._token_exp = 0.0
         self._http = httpx.AsyncClient(timeout=25.0, headers={"User-Agent": f"heuhaufen/{config.APP_VERSION}"})
@@ -111,7 +112,7 @@ class EbayClient:
         for attempt in (1, 2):
             token = await self._token_value()
             if purpose:
-                db.count_api_call(purpose, platform="ebay")
+                db.count_api_call(purpose, platform="ebay", user_id=self.user_id)
             try:
                 r = await self._http.get(API + path, params=params, headers=self._headers(token, plz))
             except httpx.HTTPError as e:
@@ -316,7 +317,7 @@ class EbayPlattform(Plattform):
     details = True
 
     def __init__(self) -> None:
-        self.client = EbayClient()
+        self._clients: dict[object, EbayClient] = {}   # je Konto ein Client mit eigenem Token
         self._pickup_runs: dict[int, float] = {}    # Gesuch → letzte Abholsuche
         self._split_until: dict[int, float] = {}    # Gesuch → bis dann Auktion und Sofortkauf getrennt suchen
 
@@ -333,16 +334,28 @@ class EbayPlattform(Plattform):
     def configured(self, settings: dict) -> bool:
         return all(self._keys(settings))
 
-    def _ready(self, settings: dict) -> str:
-        """Zugangsdaten an den Client geben; liefert die PLZ für Versandkosten und Entfernung."""
-        self.client.use(*self._keys(settings))
+    def _client(self, settings: dict) -> EbayClient:
+        """Client des Kontos, dem diese Einstellungen gehören, mit dessen Zugangsdaten."""
+        uid = settings.get("_user_id")
+        client = self._clients.get(uid)
+        if client is None:
+            client = self._clients[uid] = EbayClient()
+        client.use(*self._keys(settings))
+        client.user_id = uid
+        return client
+
+    @staticmethod
+    def _plz(settings: dict) -> str:
+        """PLZ für Versandkosten und Entfernung."""
         return (settings.get("plz") or "").strip()
 
     async def close(self) -> None:
-        await self.client.close()
+        for client in self._clients.values():
+            await client.close()
 
-    def forget_pickup(self) -> None:
-        self._pickup_runs.clear()
+    def forget_pickup(self, search_ids: list[int]) -> None:
+        for sid in search_ids:
+            self._pickup_runs.pop(sid, None)
 
     # ------------------------------------------------------------ Filter
 
@@ -369,7 +382,8 @@ class EbayPlattform(Plattform):
 
     # ------------------------------------------------------------ Suchen
 
-    async def _search_shipped(self, s: dict, formats: list[str], plz: str, now: float) -> list[dict]:
+    async def _search_shipped(self, client: EbayClient, s: dict, formats: list[str], plz: str,
+                              now: float) -> list[dict]:
         """Angebote mit Versand nach Deutschland (Strategie siehe oben)."""
         def filters(fmts: list[str]) -> list[str]:
             f = self._base_filters(s) + [
@@ -383,25 +397,25 @@ class EbayPlattform(Plattform):
 
         found: list[dict] = []
         if len(formats) > 1 and now >= self._split_until.get(s["id"], 0):
-            together = await self.client.search(s["query"], filters(formats), None, plz, max_pages=1)
+            together = await client.search(s["query"], filters(formats), None, plz, max_pages=1)
             if getattr(together, "complete", True):
                 return list(together)
             self._split_until[s["id"]] = now + SPLIT_FOR   # zu viele Treffer: eine Weile gleich getrennt
             found.extend(together)
         for fmt in formats:
             sort = "endingSoonest" if fmt == "AUCTION" else "newlyListed"
-            found.extend(await self.client.search(s["query"], filters([fmt]), sort, plz))
+            found.extend(await client.search(s["query"], filters([fmt]), sort, plz))
         return found
 
     async def find(self, s: dict, settings: dict, now: float) -> Found:
-        plz = self._ready(settings)
+        client, plz = self._client(settings), self._plz(settings)
         radius = db.setting_int(settings, "radius_km", 50)
         formats = FORMATS.get(s["format"], ["AUCTION"])
         pickup_wanted = s["pickup_mode"] != "hide" and bool(plz)
         pickup_now = pickup_wanted and (s["last_run"] is None
                                         or now - self._pickup_runs.get(s["id"], 0) >= PICKUP_EVERY)
         found: dict[str, tuple[dict, bool]] = {}
-        for summary in await self._search_shipped(s, formats, plz, now):
+        for summary in await self._search_shipped(client, s, formats, plz, now):
             if summary.get("itemId"):
                 found[summary["itemId"]] = (summary, False)
         if pickup_now:
@@ -414,7 +428,7 @@ class EbayPlattform(Plattform):
                 f"pickupRadius:{search_radius}",
                 "pickupRadiusUnit:km",
             ]
-            for summary in await self.client.search(s["query"], filters, None, plz):
+            for summary in await client.search(s["query"], filters, None, plz):
                 if summary.get("itemId"):   # auch Angebote mit Versand: so kennt Heuhaufen die Entfernung
                     found[summary["itemId"]] = (summary, True)
             self._pickup_runs[s["id"]] = now
@@ -422,15 +436,14 @@ class EbayPlattform(Plattform):
 
     async def fetch(self, item_id: str, settings: dict, purpose: str,
                     pickup: bool = False) -> tuple[dict, dict | None] | None:
-        plz = self._ready(settings)
-        raw = await self.client.get_item(item_id, plz, purpose=purpose)
+        raw = await self._client(settings).get_item(item_id, self._plz(settings), purpose=purpose)
         if raw is None:
             return None
         return parse_listing(raw, pickup), parse_detail(raw)
 
     async def compare(self, settings: dict, s: dict | None = None, query: str | None = None,
                       catalog: str | None = None) -> tuple[list[dict], bool]:
-        plz = self._ready(settings)
+        client, plz = self._client(settings), self._plz(settings)
         if s is not None:
             # wie die Suche des Gesuchs, aber nur Sofortkauf und ohne Höchstpreis
             q, extra = s["query"], None
@@ -441,7 +454,7 @@ class EbayPlattform(Plattform):
             q, extra = (None, {"epid": catalog}) if catalog else (query, None)
             filters = ["priceCurrency:EUR", "buyingOptions:{FIXED_PRICE}", "deliveryCountry:DE",
                        "itemLocationCountry:DE"]
-        results = await self.client.search(q, filters, None, plz, max_pages=1, extra=extra, purpose="durchschnitt")
+        results = await client.search(q, filters, None, plz, max_pages=1, extra=extra, purpose="durchschnitt")
         complete = len(results) < PAGE_SIZE   # vor dem Filtern: hat eBay alles geliefert?
         return [parse_listing(x) for x in results], complete
 
@@ -451,5 +464,4 @@ class EbayPlattform(Plattform):
         return image_size(url, size)
 
     async def check(self, settings: dict) -> dict:
-        self._ready(settings)
-        return await self.client.rate_limits()
+        return await self._client(settings).rate_limits()

@@ -81,8 +81,9 @@ class Plattform:
     async def close(self) -> None:
         pass
 
-    def forget_pickup(self) -> None:
-        """Standort oder Umkreis geändert: beim nächsten Mal auch Abholangebote neu suchen."""
+    def forget_pickup(self, search_ids: list[int]) -> None:
+        """Standort oder Umkreis eines Kontos geändert: für diese Gesuche beim nächsten Mal auch
+        Abholangebote neu suchen."""
 
     async def find(self, s: dict, settings: dict, now: float) -> Found:
         """Neue Angebote zu einem Gesuch (Suchbegriff, Höchstpreis, Format, Standort, Zustand …)."""

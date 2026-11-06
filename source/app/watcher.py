@@ -10,6 +10,9 @@ Dazu alle paar Minuten: Vergleichsangebote für den Durchschnittspreis holen (ma
 
 Wie gesucht wird, entscheidet die Plattform (plattformen/, z. B. ebay.py). Hier steht nur, was für alle
 gilt: Limit, Ausschlusswörter, Ausgeblendete, Endspurt, Erinnerung, Benachrichtigungen.
+
+Mehrere Konten: Jedes Gesuch gehört einem Konto. Gesucht und benachrichtigt wird mit dessen Einstellungen
+(Zugangsdaten, Standort, ntfy …). Gesuche gesperrter Konten ruhen.
 """
 from __future__ import annotations
 
@@ -38,6 +41,10 @@ ITEM_FIELDS = [
 ]
 
 
+# Gesuche und Angebote aktiver Konten (Gesuche ohne Konto gibt es nur in Tests)
+ACTIVE_OWNER = "COALESCE((SELECT u.active FROM users u WHERE u.id = s.user_id), 1) = 1"
+
+
 class Watcher:
     REMIND_BEFORE = 60          # „1 Min vorher erinnern“: so viele Sekunden vor Ende kommt der Hinweis
     REMIND_LEAD = 8             # … und so viel früher wird nachgesehen (Zeit für Abfrage und Versand)
@@ -46,13 +53,34 @@ class Watcher:
         self.wake = asyncio.Event()
         self.task: asyncio.Task | None = None
         self.last_tick: float | None = None
-        self.last_checks: dict[str, dict] = {}       # Plattform → Ergebnis von „Verbindung prüfen“
-        self.last_ntfy_error: str | None = None
+        self.last_checks: dict[tuple, dict] = {}     # (Konto, Plattform) → Ergebnis von „Verbindung prüfen“
+        self.ntfy_errors: dict = {}                  # Konto → letzter Fehler beim Senden an ntfy
+        self._settings: dict = {}                    # Einstellungen je Konto, gilt für einen Takt
         self._market_next = 0.0
 
     @staticmethod
     def platform(key: str) -> Plattform:
         return plattformen.get(key)
+
+    def settings_for(self, user_id, given: dict | None = None) -> dict:
+        """Einstellungen des Kontos, dem ein Gesuch gehört (innerhalb eines Takts nur einmal gelesen).
+        given: dieselben für alle (Tests mit nur einem Konto)."""
+        if given is not None:
+            return given
+        if user_id not in self._settings:
+            self._settings[user_id] = db.get_settings(user_id)
+        return self._settings[user_id]
+
+    def _ntfy_result(self, settings: dict, error: Exception | None = None) -> None:
+        uid = settings.get("_user_id")
+        if error is None:
+            self.ntfy_errors.pop(uid, None)
+        else:
+            self.ntfy_errors[uid] = str(error)
+            log.warning("ntfy: %s", error)
+
+    def ntfy_error(self, user_id) -> str | None:
+        return self.ntfy_errors.get(user_id)
 
     # ------------------------------------------------------------ Lebenszyklus
 
@@ -69,10 +97,11 @@ class Watcher:
     def poke(self) -> None:
         self.wake.set()
 
-    def forget_pickup(self) -> None:
-        """PLZ oder Umkreis geändert: beim nächsten Lauf jedes Gesuchs auch die Abholsuche machen."""
+    def forget_pickup(self, user_id: int | None) -> None:
+        """PLZ oder Umkreis eines Kontos geändert: beim nächsten Lauf seiner Gesuche auch die Abholsuche."""
+        ids = [r["id"] for r in db.q("SELECT id FROM searches WHERE user_id IS ?", (user_id,))]
         for p in plattformen.ALL.values():
-            p.forget_pickup()
+            p.forget_pickup(ids)
 
     @staticmethod
     def interval_seconds(s: dict, settings: dict) -> int:
@@ -106,18 +135,19 @@ class Watcher:
 
     async def tick(self) -> None:
         self.last_tick = time.time()
+        self._settings = {}
         db.prune()
         images.cleanup_if_due()
-        settings = db.get_settings()
-        if not plattformen.any_configured(settings):
-            return
-        await self.check_endings(settings)
-        await self.check_reminders(settings)
-        for s in db.q("SELECT * FROM searches WHERE active = 1 ORDER BY id"):
+        await self.check_endings()
+        await self.check_reminders()
+        for s in db.q(f"SELECT * FROM searches s WHERE s.active = 1 AND {ACTIVE_OWNER} ORDER BY s.id"):
+            settings = self.settings_for(s["user_id"])
+            if not any(p.configured(settings) for p in plattformen.of_search(s)):
+                continue
             if s["last_run"] is None or time.time() - s["last_run"] >= self.interval_seconds(s, settings):
                 await self.discover(s, settings)
-                await self.check_endings(settings)
-        await self.update_market(settings)
+                await self.check_endings()
+        await self.update_market()
 
     # ------------------------------------------------------------ Entdecken
 
@@ -207,12 +237,12 @@ class Watcher:
 
     # ------------------------------------------------------------ Endspurt
 
-    async def check_endings(self, settings: dict) -> None:
+    async def check_endings(self, given: dict | None = None) -> None:
         now = time.time()
         rows = db.q(
-            """
+            f"""
             SELECT i.* FROM items i JOIN searches s ON s.id = i.search_id
-            WHERE s.active = 1 AND s.format IN ('auction', 'both')
+            WHERE s.active = 1 AND {ACTIVE_OWNER} AND s.format IN ('auction', 'both')
               AND i.status = 'active' AND i.is_auction = 1 AND i.end_checked = 0
               AND i.end_time IS NOT NULL AND i.end_time > ?
               AND i.end_time - s.lead_minutes * 60 <= ?
@@ -227,6 +257,7 @@ class Watcher:
 
         for row in rows:
             s = db.q1("SELECT * FROM searches WHERE id = ?", (row["search_id"],))
+            settings = self.settings_for(s["user_id"] if s else None, given)
             if not s or not plattformen.of_item(row).configured(settings):
                 continue
             try:
@@ -251,10 +282,9 @@ class Watcher:
                 try:
                     await notify.send(settings, **self._auction_push(s, view, settings))
                 except notify.NtfyError as e:
-                    self.last_ntfy_error = str(e)
-                    log.warning("ntfy: %s", e)
+                    self._ntfy_result(settings, e)
                     continue  # nächster Takt versucht es erneut
-                self.last_ntfy_error = None
+                self._ntfy_result(settings)
             db.ex(
                 "UPDATE items SET end_checked = 1, notified_end = ? WHERE search_id = ? AND item_id = ?",
                 (1 if view["within"] else 0, *key),
@@ -290,14 +320,14 @@ class Watcher:
 
     # ------------------------------------------------------------ Erinnerung 1 Minute vor Ende
 
-    async def check_reminders(self, settings: dict) -> None:
+    async def check_reminders(self, given: dict | None = None) -> None:
         """Angebote mit gedrücktem „1 Min vorher erinnern“: kurz vor Ende den Preis holen und, wenn er
         noch passt, auffällig melden. Passt er nicht mehr, kommt ein stiller Hinweis."""
         now = time.time()
         rows = db.q(
-            """
+            f"""
             SELECT i.* FROM items i JOIN searches s ON s.id = i.search_id
-            WHERE s.active = 1 AND i.remind = 1 AND i.reminded = 0 AND i.status = 'active'
+            WHERE s.active = 1 AND {ACTIVE_OWNER} AND i.remind = 1 AND i.reminded = 0 AND i.status = 'active'
               AND i.end_time IS NOT NULL AND i.end_time > ? AND i.end_time - ? <= ?
               AND NOT EXISTS (SELECT 1 FROM hidden_items h
                               WHERE h.search_id = i.search_id AND h.item_id = i.item_id)
@@ -309,6 +339,7 @@ class Watcher:
             key = (row["search_id"], row["item_id"])
             db.ex("UPDATE items SET reminded = 1 WHERE search_id = ? AND item_id = ?", key)   # nur ein Versuch
             s = db.q1("SELECT * FROM searches WHERE id = ?", (row["search_id"],))
+            settings = self.settings_for(s["user_id"], given)
             try:
                 item = await self._fresh_item(row, settings, "erinnerung")
             except PlatformError as e:
@@ -319,10 +350,9 @@ class Watcher:
             view = util.item_view(item, s, time.time())
             try:
                 await notify.send(settings, **self._reminder_push(s, view, settings))
-                self.last_ntfy_error = None
+                self._ntfy_result(settings)
             except notify.NtfyError as e:
-                self.last_ntfy_error = str(e)
-                log.warning("ntfy: %s", e)
+                self._ntfy_result(settings, e)
 
     def _remind_url(self, settings: dict, s: dict, v: dict) -> str | None:
         base = self._app_base(settings)
@@ -357,18 +387,23 @@ class Watcher:
 
     # ------------------------------------------------------------ Durchschnittspreis
 
-    async def update_market(self, settings: dict) -> None:
+    async def update_market(self, given: dict | None = None) -> None:
         """Holt Vergleichsangebote: zuerst die tägliche Suche je Gesuch, dann gezielte Abfragen für
         Angebote unter dem Limit – erst die, denen der Vergleich fehlt, dann wöchentlich die übrigen,
-        damit der Preisverlauf weiterwächst (siehe market.py)."""
-        if not market.enabled(settings) or time.time() < self._market_next:
+        damit der Preisverlauf weiterwächst (siehe market.py). Die Vergleichsangebote sind für alle Konten
+        gemeinsam; abgefragt wird mit den Zugangsdaten und im Tageslimit des Kontos, dem das Gesuch gehört."""
+        if time.time() < self._market_next:
             return
         self._market_next = time.time() + MARKET_EVERY
         market.prune()
-        searches = db.q("SELECT * FROM searches WHERE active = 1 AND last_run IS NOT NULL ORDER BY id")
-        searches = [s for s in searches if self._market_platform(s, settings)]
+        searches = []
+        for s in db.q(f"SELECT * FROM searches s WHERE s.active = 1 AND {ACTIVE_OWNER} AND s.last_run IS NOT NULL "
+                      "ORDER BY s.id"):
+            settings = self.settings_for(s["user_id"], given)
+            if market.enabled(settings) and self._market_platform(s, settings):
+                searches.append((s, settings))
 
-        for s in searches:   # höchstens eine Gesuch-Suche pro Durchgang, nur wenn es Angebote gibt
+        for s, settings in searches:   # höchstens eine Gesuch-Suche pro Durchgang, nur wenn es Angebote gibt
             key = market.search_key(s["id"])
             has_items = db.q1("SELECT 1 AS x FROM items WHERE search_id = ? AND status = 'active' LIMIT 1", (s["id"],))
             if has_items and market.due(key):
@@ -376,9 +411,9 @@ class Watcher:
                 return
 
         now = time.time()
-        wanted: dict[str, tuple[int, float, dict, dict]] = {}
+        wanted: dict[str, tuple[int, float, dict, dict, dict]] = {}
         in_use: set[str] = set()
-        for s in searches:
+        for s, settings in searches:
             items = db.q("SELECT * FROM items WHERE search_id = ?", (s["id"],))
             views = util.search_overview(s, items, now, db.hidden_ids(s["id"]))["matches"]
             comparison = market.Comparison(s, settings, views)
@@ -390,11 +425,21 @@ class Watcher:
                 if key not in wanted and market.due(key, now):
                     # Reihenfolge: fehlender Ø vor Auffrischen, bald endende Auktionen zuerst
                     missing = comparison.compare(v) is None
-                    wanted[key] = (0 if missing else 1, v["end_time"] or float("inf"), s, v)
+                    wanted[key] = (0 if missing else 1, v["end_time"] or float("inf"), s, v, settings)
         market.touch(in_use, now)
 
-        budget = min(MARKET_LOOKUPS_PER_RUN, market.daily_lookups(settings) - market.lookups_today())
-        for key, (_prio, _end, s, v) in sorted(wanted.items(), key=lambda w: w[1][:2])[:max(0, budget)]:
+        budgets: dict = {}   # Konto → noch erlaubte gezielte Abfragen heute
+        done = 0
+        for key, (_prio, _end, s, v, settings) in sorted(wanted.items(), key=lambda w: w[1][:2]):
+            if done >= MARKET_LOOKUPS_PER_RUN:
+                break
+            uid = settings.get("_user_id")
+            if uid not in budgets:
+                budgets[uid] = market.daily_lookups(settings) - market.lookups_today(uid)
+            if budgets[uid] <= 0:
+                continue
+            budgets[uid] -= 1
+            done += 1
             p = self._market_platform(s, settings)
             if key.startswith("epid:"):
                 await self._fetch_market(p, key, settings, catalog=key[5:])
@@ -414,12 +459,12 @@ class Watcher:
             listings, complete = await p.compare(settings, s=s, query=query, catalog=catalog)
         except PlatformError as e:
             log.info("Durchschnittspreis %s: %s", key, e)
-            market.store(key, None)
+            market.store(key, None, user_id=settings.get("_user_id"))
             return
         excluded = util.exclusion_words(exclude)
         if excluded:
             listings = [x for x in listings if not any(w in (x.get("title") or "").lower() for w in excluded)]
-        market.store(key, listings, complete=complete)
+        market.store(key, listings, complete=complete, user_id=settings.get("_user_id"))
 
     # ------------------------------------------------------------ Nachrichten
 
@@ -445,10 +490,9 @@ class Watcher:
                 else:
                     for v in views:
                         await notify.send(settings, **self._fixed_push(s, v, settings))
-                self.last_ntfy_error = None
+                self._ntfy_result(settings)
             except notify.NtfyError as e:
-                self.last_ntfy_error = str(e)
-                log.warning("ntfy: %s", e)
+                self._ntfy_result(settings, e)
                 return  # nicht als gemeldet markieren, nächster Lauf versucht es erneut
         for v in views:
             db.ex("UPDATE items SET notified_bin = 1 WHERE search_id = ? AND item_id = ?", (s["id"], v["item_id"]))
@@ -569,15 +613,16 @@ class Watcher:
 
     # ------------------------------------------------------------ Einstellungen
 
-    async def check_platform(self, key: str) -> None:
-        """Einstellungen → „Verbindung prüfen“."""
+    async def check_platform(self, key: str, user_id=None) -> None:
+        """Einstellungen → „Verbindung prüfen“ mit den Zugangsdaten eines Kontos."""
         p = plattformen.get(key)
+        slot = (user_id, p.key)
         try:
-            limits = await p.check(db.get_settings())
-            self.last_checks[p.key] = {"ok": True, "at": time.time(), **limits}
+            limits = await p.check(db.get_settings(user_id))
+            self.last_checks[slot] = {"ok": True, "at": time.time(), **limits}
         except PlatformError as e:
-            self.last_checks[p.key] = {"ok": False, "at": time.time(), "error": str(e)}
+            self.last_checks[slot] = {"ok": False, "at": time.time(), "error": str(e)}
         except Exception as e:   # unerwartete Antwort: anzeigen statt die Einstellungen abstürzen zu lassen
             log.exception("Verbindung prüfen (%s)", p.name)
-            self.last_checks[p.key] = {"ok": False, "at": time.time(),
-                                       "error": f"Prüfung fehlgeschlagen ({e.__class__.__name__})."}
+            self.last_checks[slot] = {"ok": False, "at": time.time(),
+                                      "error": f"Prüfung fehlgeschlagen ({e.__class__.__name__})."}
