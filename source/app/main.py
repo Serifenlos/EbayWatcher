@@ -1,4 +1,4 @@
-"""Weboberfläche von Ebay Watcher."""
+"""Weboberfläche von Heuhaufen."""
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +21,7 @@ from .ebay import PURPOSES, EbayError
 from .watcher import Watcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-log = logging.getLogger("ebay-watcher")
+log = logging.getLogger("heuhaufen")
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -33,7 +33,7 @@ async def lifespan(_app: FastAPI):
     db.init()
     auth.ensure_admin()
     watcher.start()
-    log.info("Ebay Watcher %s läuft.", config.APP_VERSION)
+    log.info("Heuhaufen %s läuft.", config.APP_VERSION)
     yield
     await watcher.stop()
     await images.close()
@@ -93,7 +93,7 @@ MESSAGES = {
     "sessions": "Alle anderen Geräte sind abgemeldet.",
     "ebay": "Verbindung zu eBay geprüft.",
     "hidden": "Angebot ausgeblendet.",
-    "market": "Gespeichert. Neue Vergleichsangebote holt Ebay Watcher in den nächsten Minuten.",
+    "market": "Gespeichert. Neue Vergleichsangebote holt Heuhaufen in den nächsten Minuten.",
     "display": "Gespeichert.",
     "unhidden": "Angebot wieder eingeblendet.",
     "logout": "Du bist abgemeldet.",
@@ -186,15 +186,24 @@ def back(path: str, key: str | None = None, err: bool = False, anchor: str = "")
 async def guard(request: Request, call_next):
     request.state.session = None
     path = request.url.path
+    legacy = None
     if not path.startswith(PUBLIC_PREFIXES):
-        sess = auth.load_session(request.cookies.get(auth.SESSION_COOKIE))
+        token, is_legacy = auth.session_token(request.cookies)
+        sess = auth.load_session(token)
         if not sess:
             target = "/login"
             if request.method == "GET" and path != "/":
                 target += "?next=" + quote(path)
             return _with_headers(RedirectResponse(target, 303))
         request.state.session = sess
-    return _with_headers(await call_next(request))
+        legacy = token if is_legacy else None
+    resp = await call_next(request)
+    if legacy:   # Anmeldung aus „Ebay Watcher“: Cookie unter dem neuen Namen weiterführen
+        remaining = int(request.state.session["expires_at"] - time.time())
+        set_cookie(resp, request, auth.SESSION_COOKIE, legacy,
+                   max_age=max(60, remaining) if request.state.session["remember"] else None)
+        resp.delete_cookie(auth.LEGACY_SESSION_COOKIE, path="/")
+    return _with_headers(resp)
 
 
 @app.exception_handler(CsrfFailed)
@@ -226,7 +235,7 @@ async def remind_item(request: Request, sid: int, item_id: str):
 
 @app.api_route("/bild/{sid}/{item_id}", methods=["GET", "HEAD"])
 async def article_image(request: Request, sid: int, item_id: str):
-    """Artikelbild aus dem Bild-Cache. Beim ersten Abruf lädt Ebay Watcher es einmal bei eBay.
+    """Artikelbild aus dem Bild-Cache. Beim ersten Abruf lädt Heuhaufen es einmal bei eBay.
     n: Nummer des Bildes (Galerie), g=1: groß."""
     if not images.valid(sid, item_id, request.query_params.get("s")):
         return PlainTextResponse("Ungültige Bildadresse.", 403)
@@ -247,7 +256,7 @@ async def article_image(request: Request, sid: int, item_id: str):
 @app.get("/galerie/{sid}/{item_id}")
 async def gallery(sid: int, item_id: str):
     """Bilder eines Angebots für die Galerie (PhotoSwipe, siehe app.js), mit Breite und Höhe, dazu die
-    Seitenleiste (panel) als fertiges HTML. Beim ersten Öffnen lädt Ebay Watcher alle Bilder groß bei eBay
+    Seitenleiste (panel) als fertiges HTML. Beim ersten Öffnen lädt Heuhaufen alle Bilder groß bei eBay
     und legt sie in den Bild-Cache. Beschreibung und Gebote holt es mit einer Einzelabfrage, höchstens alle
     10 Minuten (details.py)."""
     row = db.q1("SELECT * FROM items WHERE search_id = ? AND item_id = ?", (sid, item_id))
@@ -316,7 +325,7 @@ def _complete_login(request: Request, user_id: int, remember: bool, next_: str) 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    if auth.load_session(request.cookies.get(auth.SESSION_COOKIE)):
+    if auth.load_session(auth.session_token(request.cookies)[0]):
         return RedirectResponse("/", 303)
     return _login_form(request, request.query_params.get("next", "/"))
 
@@ -391,9 +400,10 @@ async def login_2fa(request: Request):
 @app.post("/logout")
 async def logout(request: Request):
     await checked_form(request)
-    auth.destroy_session(request.cookies.get(auth.SESSION_COOKIE))
+    auth.destroy_session(auth.session_token(request.cookies)[0])
     resp = RedirectResponse("/login?ok=logout", 303)
     resp.delete_cookie(auth.SESSION_COOKIE, path="/")
+    resp.delete_cookie(auth.LEGACY_SESSION_COOKIE, path="/")
     return resp
 
 
@@ -412,7 +422,7 @@ def _notices() -> list[dict]:
         out.append({"text": f"Die letzte Benachrichtigung ist nicht angekommen. {watcher.last_ntfy_error}",
                     "link": "/settings#benachrichtigungen", "action": "Prüfen"})
     if not s["plz"]:
-        out.append({"text": "Ohne Postleitzahl findet Ebay Watcher keine Abholangebote in deiner Nähe.",
+        out.append({"text": "Ohne Postleitzahl findet Heuhaufen keine Abholangebote in deiner Nähe.",
                     "link": "/settings#standort", "action": "PLZ eintragen"})
     return out
 
@@ -748,7 +758,7 @@ async def save_ntfy(request: Request):
 async def test_ntfy(request: Request):
     await checked_form(request)
     try:
-        await notify.send(db.get_settings(), title="Ebay Watcher ist verbunden",
+        await notify.send(db.get_settings(), title="Heuhaufen ist verbunden",
                           message="So sehen deine Benachrichtigungen aus. Alles bereit.",
                           tags=["white_check_mark"], priority=3)
         watcher.last_ntfy_error = None

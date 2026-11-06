@@ -2,14 +2,14 @@
 
 * Seiten und Benachrichtigungen verweisen auf /bild/<Gesuch>/<Artikel>?v=…&s=… statt auf eBay.
   Die Galerie (Klick aufs Vorschaubild) nutzt dieselbe Adresse mit &n=<Nummer des Bildes>&g=1 für groß.
-* s ist eine Signatur. Gültig sind nur Adressen, die Ebay Watcher selbst erzeugt hat. Deshalb kommt die
+* s ist eine Signatur. Gültig sind nur Adressen, die Heuhaufen selbst erzeugt hat. Deshalb kommt die
   Adresse ohne Login aus (ntfy auf dem Handy kann das Bild laden), lässt sich aber nicht für fremde
   Artikel oder Seiten missbrauchen. v ändert sich, wenn der Verkäufer das Bild austauscht.
 * Die eBay-Adressen der Bilder stehen in der eigenen Datenbank. Geladen wird nur von eBay-Servern,
   für Listen und Benachrichtigungen in 500 px, für die Galerie in 1600 px.
 * Die Dateien liegen im Datenordner unter cache/bilder. Die stündliche Pflege löscht Bilder, die
   14 Tage nicht angezeigt wurden, und hält den Ordner unter 500 MB.
-* Klappt das Laden nicht, schickt Ebay Watcher den Browser direkt zu eBay (wie ohne Cache).
+* Klappt das Laden nicht, schickt Heuhaufen den Browser direkt zu eBay (wie ohne Cache).
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ import httpx
 
 from . import config, db, signed, util
 
-log = logging.getLogger("ebay-watcher.bilder")
+log = logging.getLogger("heuhaufen.bilder")
 
 CACHE_DIR = config.DATA_DIR / "cache" / "bilder"
 KEEP_DAYS = 14                          # so lange nicht angezeigt, dann wird ein Bild gelöscht
@@ -53,7 +53,7 @@ _last_cleanup = 0.0
 # ---------------------------------------------------------------- Adressen
 
 def url(search_id: int | None, item_id: str | None, image: str | None, n: int = 0, big: bool = False) -> str | None:
-    """Adresse eines Artikelbildes in Ebay Watcher, z. B. /bild/3/v1%7C1234%7C0?v=…&s=…
+    """Adresse eines Artikelbildes in Heuhaufen, z. B. /bild/3/v1%7C1234%7C0?v=…&s=…
     n: Nummer des Bildes (0 = Hauptbild), big: groß für die Galerie."""
     if not image or search_id is None or not item_id:
         return None
@@ -85,7 +85,7 @@ def originals(search_id: int, item_id: str) -> list[str]:
 
 
 def source(search_id: int, item_id: str, n: int = 0, big: bool = False) -> str | None:
-    """eBay-Adresse eines Bildes in der Größe, in der Ebay Watcher es lädt."""
+    """eBay-Adresse eines Bildes in der Größe, in der Heuhaufen es lädt."""
     found = originals(search_id, item_id)
     if not 0 <= n < len(found):
         return None
@@ -200,7 +200,7 @@ def _exif_orientation(tiff: bytes) -> int | None:
 def _client() -> httpx.AsyncClient:
     global _http
     if _http is None:
-        _http = httpx.AsyncClient(timeout=10.0, headers={"User-Agent": f"ebay-watcher/{config.APP_VERSION}"})
+        _http = httpx.AsyncClient(timeout=10.0, headers={"User-Agent": f"heuhaufen/{config.APP_VERSION}"})
     return _http
 
 

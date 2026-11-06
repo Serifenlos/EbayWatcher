@@ -62,9 +62,9 @@
       </div>
     </div>
     <div class="grid min-w-0 gap-2">
-      <label class="{{ ui.label() }}" for="app_url">Adresse von Ebay Watcher <span class="font-normal text-muted">optional</span></label>
+      <label class="{{ ui.label() }}" for="app_url">Adresse von Heuhaufen <span class="font-normal text-muted">optional</span></label>
       <input class="{{ ui.input() }}" id="app_url" name="app_url" value="{{ s.app_url }}" placeholder="http://192.168.178.20:8765" autocomplete="off" {% if errors.app_url %}aria-invalid="true"{% endif %}>
-      <p class="{{ ui.hint() }}">Dann enthält jede Benachrichtigung auch einen Link zurück zu Ebay Watcher, das Artikelbild kommt aus dem eigenen Bild-Cache statt von eBay, und es gibt den Knopf „1 Min vorher erinnern“. Das Handy muss diese Adresse erreichen können, sonst fehlen Bild und Knopf.</p>
+      <p class="{{ ui.hint() }}">Dann enthält jede Benachrichtigung auch einen Link zurück zu Heuhaufen, das Artikelbild kommt aus dem eigenen Bild-Cache statt von eBay, und es gibt den Knopf „1 Min vorher erinnern“. Das Handy muss diese Adresse erreichen können, sonst fehlen Bild und Knopf.</p>
       {{ ui.error(errors, 'app_url') }}
     </div>
     <div class="flex flex-wrap items-center gap-2.5"><button class="{{ ui.button('primary') }}" type="submit">Speichern</button></div>
@@ -88,7 +88,7 @@
 <section class="{{ panel }}" id="durchschnitt">
   <div>
     <h2>Durchschnittspreis</h2>
-    <p class="{{ panel_text }}">Neben jedem Angebot steht der Durchschnitt (Ø) der Sofortkauf-Angebote desselben Produkts. Ebay Watcher merkt sich die Angebote, so wächst der Vergleich mit der Zeit. Das sind Angebots-, keine Verkaufspreise.</p>
+    <p class="{{ panel_text }}">Neben jedem Angebot steht der Durchschnitt (Ø) der Sofortkauf-Angebote desselben Produkts. Heuhaufen merkt sich die Angebote, so wächst der Vergleich mit der Zeit. Das sind Angebots-, keine Verkaufspreise.</p>
   </div>
   <form class="{{ stack }}" method="post" action="/settings/market" novalidate>
     {{ ui.csrf_field(csrf) }}
@@ -121,7 +121,7 @@
           <input class="{{ ui.input('unit') }}" id="market_lookups" name="market_lookups" value="{{ s.market_lookups }}" inputmode="numeric" {% if errors.market_lookups %}aria-invalid="true"{% endif %}>
           <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">pro Tag</span>
         </div>
-        <p class="{{ ui.hint() }}">Für Angebote mit Artikel- oder Katalognummer sucht Ebay Watcher gezielt nach Vergleichsangeboten und frischt sie wöchentlich auf. 0 schaltet das ab. Heute: {{ market_lookups_today }}.</p>
+        <p class="{{ ui.hint() }}">Für Angebote mit Artikel- oder Katalognummer sucht Heuhaufen gezielt nach Vergleichsangeboten und frischt sie wöchentlich auf. 0 schaltet das ab. Heute: {{ market_lookups_today }}.</p>
         {{ ui.error(errors, 'market_lookups') }}
       </div>
     </div>
@@ -132,7 +132,7 @@
 <section class="{{ panel }}" id="benachrichtigungen">
   <div>
     <h2>Benachrichtigungen</h2>
-    <p class="{{ panel_text }}">Ebay Watcher schickt Pushs an deine ntfy-Instanz. Abonniere dasselbe Topic in der ntfy-App auf deinem Handy.</p>
+    <p class="{{ panel_text }}">Heuhaufen schickt Pushs an deine ntfy-Instanz. Abonniere dasselbe Topic in der ntfy-App auf deinem Handy.</p>
   </div>
   <div class="{{ stack }}">
     <form class="{{ stack }}" method="post" action="/settings/ntfy" novalidate>
@@ -144,7 +144,7 @@
       </div>
       <div class="grid min-w-0 gap-2">
         <label class="{{ ui.label() }}" for="ntfy_topic">Topic</label>
-        <input class="{{ ui.input() }}" id="ntfy_topic" name="ntfy_topic" value="{{ s.ntfy_topic }}" placeholder="ebay-watcher" autocomplete="off" spellcheck="false" {% if errors.ntfy_topic %}aria-invalid="true"{% endif %}>
+        <input class="{{ ui.input() }}" id="ntfy_topic" name="ntfy_topic" value="{{ s.ntfy_topic }}" placeholder="heuhaufen" autocomplete="off" spellcheck="false" {% if errors.ntfy_topic %}aria-invalid="true"{% endif %}>
         {{ ui.error(errors, 'ntfy_topic') }}
       </div>
       <div class="grid min-w-0 gap-2">
@@ -198,7 +198,7 @@
     <div class="{{ subsection }}">
       <h3>Zwei-Faktor-Anmeldung</h3>
       {% if user.totp_enabled %}
-      <p class="text-muted">Aktiv. Beim Anmelden fragt Ebay Watcher zusätzlich nach dem Code aus deiner Authenticator-App.</p>
+      <p class="text-muted">Aktiv. Beim Anmelden fragt Heuhaufen zusätzlich nach dem Code aus deiner Authenticator-App.</p>
       <form class="grid gap-4" method="post" action="/settings/2fa/disable" novalidate>
         {{ ui.csrf_field(csrf) }}
         <div class="grid min-w-0 gap-2">
@@ -273,7 +273,7 @@
 
 <section class="{{ panel }}" id="info">
   <div>
-    <h2>Über Ebay Watcher</h2>
+    <h2>Über Heuhaufen</h2>
     <p class="{{ panel_text }}">Alle Versionen stehen auf GitHub.</p>
   </div>
   <div class="{{ stack }}">

@@ -5,7 +5,10 @@ import os
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
-DB_PATH = DATA_DIR / "ebay-watcher.db"
+DB_PATH = DATA_DIR / "heuhaufen.db"
+# Frühere Namen der Datenbank (bis November 2026 hieß das Tool „Ebay Watcher“). Liegt beim Start nur eine
+# davon im Datenordner, übernimmt db.init() sie unter dem neuen Namen.
+LEGACY_DB_NAMES = ("ebay-watcher.db",)
 
 # eBay Production-Keyset: App ID (Client ID) und Cert ID (Client Secret)
 EBAY_CLIENT_ID = os.environ.get("EBAY_CLIENT_ID", "").strip()
@@ -23,8 +26,8 @@ TZ = os.environ.get("TZ", "Europe/Berlin")
 # "auto": Secure-Flag für Cookies setzen, sobald die Seite per HTTPS aufgerufen wird
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "auto").strip().lower()
 
-APP_NAME = "Ebay Watcher"
-REPO_URL = "https://github.com/Serifenlos/EbayWatcher"
+APP_NAME = "Heuhaufen"
+REPO_URL = "https://github.com/Serifenlos/Heuhaufen"
 
 
 def _app_version() -> str:

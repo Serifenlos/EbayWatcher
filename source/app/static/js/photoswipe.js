@@ -1,6 +1,6 @@
 // @codekit-prepend quiet "../../../../node_modules/photoswipe/dist/umd/photoswipe.umd.min.js";
 /*
- * Ebay Watcher – PhotoSwipe für die Bilder-Galerie (https://photoswipe.com, MIT-Lizenz).
+ * Heuhaufen – PhotoSwipe für die Bilder-Galerie (https://photoswipe.com, MIT-Lizenz).
  *
  * Diese Datei enthält keinen eigenen Code. Die Zeile oben holt die fertige Bibliothek aus dem
  * CodeKit-Paket (node_modules/photoswipe, Version in package.json), CodeKit verkleinert sie nach

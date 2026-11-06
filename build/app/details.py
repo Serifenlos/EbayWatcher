@@ -2,7 +2,7 @@
 Zustandsbeschreibung, Artikelmerkmale und der Stand der Gebote. Die Galerie zeigt sie in der Seitenleiste.
 
 * Gespeichert wird bei jeder Einzelabfrage, auch bei Endspurt und Erinnerung (dann ohne zusätzliche
-  Abfrage). Öffnet man die Galerie, fragt Ebay Watcher nur nach, wenn der Stand älter als MAX_AGE ist.
+  Abfrage). Öffnet man die Galerie, fragt Heuhaufen nur nach, wenn der Stand älter als MAX_AGE ist.
 * Die Beschreibung ist HTML von fremden Verkäufern. Gespeichert und angezeigt wird nur bereinigter Text:
   Absätze, Listenpunkte und Zwischenüberschriften, ohne Bilder, Links, Stile und Skripte. Sehr lange
   Beschreibungen werden gekürzt, die ganze steht bei eBay.

@@ -1,7 +1,7 @@
 {
-  "name": "ebay-watcher",
+  "name": "heuhaufen",
   "private": true,
-  "description": "Pakete für den CodeKit-Build von Ebay Watcher: Tailwind CSS (über PostCSS) und PhotoSwipe (Bilder-Galerie)",
+  "description": "Pakete für den CodeKit-Build von Heuhaufen: Tailwind CSS (über PostCSS) und PhotoSwipe (Bilder-Galerie)",
   "devDependencies": {
     "postcss": "^8.5.0",
     "tailwindcss": "^4.3.0"

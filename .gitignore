@@ -7,7 +7,7 @@
 .DS_Store
 
 # Editor-Einstellungen (VS Code)
-EbayWatcher.code-workspace
+*.code-workspace
 
 # Node-Pakete für CodeKit (Tailwind). Werden über package.json installiert.
 node_modules/

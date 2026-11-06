@@ -44,7 +44,7 @@
   {% elif not s.last_run %}
   <p class="mt-1.5 mb-3 max-w-[70ch] text-muted">Die erste Suche startet gleich. Lade die Seite in einem Moment neu.</p>
   {% else %}
-  <p class="mt-1.5 mb-3 max-w-[70ch] text-muted">Gerade liegt nichts unter deinem Limit. Ebay Watcher sucht weiter und meldet sich.</p>
+  <p class="mt-1.5 mb-3 max-w-[70ch] text-muted">Gerade liegt nichts unter deinem Limit. Heuhaufen sucht weiter und meldet sich.</p>
   {% endif %}
 </section>
 
@@ -72,7 +72,7 @@
 {# Immer vorhanden, aber versteckt, solange nichts ausgeblendet ist (app.js zeigt sie nach dem ersten Ausblenden) #}
 <details class="{{ fold }}" id="ausgeblendet" data-lazy="/searches/{{ s.id }}/list/hidden" {% if show == 'hidden' %}open data-loaded{% endif %} {% if not s.hidden_count %}hidden{% endif %}>
   <summary class="{{ fold_summary }}">Ausgeblendet <span class="font-num text-ui font-medium text-muted" data-count="hidden">{{ s.hidden_count }}</span></summary>
-  <p class="mt-2 mb-3 max-w-[70ch] text-muted">Diese Angebote zeigt Ebay Watcher nicht mehr an und meldet sie nicht. Über das Auge holst du sie zurück.</p>
+  <p class="mt-2 mb-3 max-w-[70ch] text-muted">Diese Angebote zeigt Heuhaufen nicht mehr an und meldet sie nicht. Über das Auge holst du sie zurück.</p>
   <div data-lazy-target>
     {% if show == 'hidden' %}
     {% with offers = hidden, kind = 'hidden', sid = s.id %}{% include "includes/offer_list.html" %}{% endwith %}

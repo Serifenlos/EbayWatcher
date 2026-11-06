@@ -1,7 +1,7 @@
 """Signierte Adressen für Aufrufe ohne Login.
 
 Bilder für ntfy (/bild/…) und Knöpfe in Benachrichtigungen (/erinnern/…) werden vom Handy aufgerufen,
-ohne angemeldet zu sein. Gültig sind sie nur mit einer Signatur, die nur Ebay Watcher erzeugen kann.
+ohne angemeldet zu sein. Gültig sind sie nur mit einer Signatur, die nur Heuhaufen erzeugen kann.
 Der geheime Schlüssel entsteht beim ersten Gebrauch und bleibt in der Datenbank (settings „image_secret“,
 so heißt er, weil ihn zuerst nur der Bild-Cache brauchte).
 """

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Datenordner dem gewünschten Benutzer geben und Ebay Watcher ohne Root-Rechte starten.
+# Datenordner dem gewünschten Benutzer geben und Heuhaufen ohne Root-Rechte starten.
 set -e
 PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"

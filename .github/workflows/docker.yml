@@ -55,7 +55,7 @@ jobs:
             type=raw,value=${{ steps.version.outputs.base }}
             type=sha,format=short
           labels: |
-            org.opencontainers.image.title=Ebay Watcher
+            org.opencontainers.image.title=Heuhaufen
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
 
       - uses: docker/build-push-action@v6
@@ -77,7 +77,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ steps.version.outputs.tag }}" -m "Ebay Watcher ${{ steps.version.outputs.version }}"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Heuhaufen ${{ steps.version.outputs.version }}"
           git push origin "${{ steps.version.outputs.tag }}"
 
       # Release mit Changelog aus den Commit-Nachrichten (siehe scripts/release_notes.py).
@@ -92,14 +92,14 @@ jobs:
           else
             python3 scripts/release_notes.py "$TAG" > release-notes.md
             gh release create "$TAG" --verify-tag \
-              --title "Ebay Watcher ${{ steps.version.outputs.version }}" \
+              --title "Heuhaufen ${{ steps.version.outputs.version }}" \
               --notes-file release-notes.md
           fi
 
       - name: Zusammenfassung
         run: |
           {
-            echo "### Ebay Watcher ${{ steps.version.outputs.version }}"
+            echo "### Heuhaufen ${{ steps.version.outputs.version }}"
             echo ""
             echo "Image-Tags:"
             echo '```'

@@ -65,7 +65,7 @@
       {{ ui.choice('pickup_mode', 'all', values.pickup_mode, 'Alle zeigen', 'Mit Entfernung, deutlich markiert in der Benachrichtigung.') }}
       {{ ui.choice('pickup_mode', 'hide', values.pickup_mode, 'Ausblenden', 'Nur Angebote mit Versand.') }}
     </div>
-    {% if not has_plz %}<p class="{{ ui.hint('warn') }}">Dafür braucht Ebay Watcher deine Postleitzahl. <a href="/settings#standort">PLZ eintragen</a></p>{% endif %}
+    {% if not has_plz %}<p class="{{ ui.hint('warn') }}">Dafür braucht Heuhaufen deine Postleitzahl. <a href="/settings#standort">PLZ eintragen</a></p>{% endif %}
   </fieldset>
 
   <details class="group/more border-y border-line py-3.5" {% if values.exclude or values.name or values.interval_raw or errors.interval_minutes %}open{% endif %}>
@@ -78,7 +78,7 @@
         <span class="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ui text-muted" aria-hidden="true">Minuten</span>
       </div>
       {{ ui.error(errors, 'interval_minutes') }}
-      <p class="{{ ui.hint() }}">Leer lassen, dann gilt die Einstellung ({{ interval_default }} Minuten). Seltener suchen spart eBay-Abfragen. Bei reinen Auktionen reichen meist 60 Minuten: Die Erinnerung vor Auktionsende kommt trotzdem pünktlich, weil Ebay Watcher jede gemerkte Auktion kurz vor Ende eigens prüft.</p>
+      <p class="{{ ui.hint() }}">Leer lassen, dann gilt die Einstellung ({{ interval_default }} Minuten). Seltener suchen spart eBay-Abfragen. Bei reinen Auktionen reichen meist 60 Minuten: Die Erinnerung vor Auktionsende kommt trotzdem pünktlich, weil Heuhaufen jede gemerkte Auktion kurz vor Ende eigens prüft.</p>
     </div>
     <div class="mt-5 grid min-w-0 gap-2">
       <label class="{{ ui.label() }}" for="exclude">Ausschließen, wenn der Titel enthält</label>

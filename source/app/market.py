@@ -1,6 +1,6 @@
 """Durchschnittspreis (Ø) je Angebot.
 
-Ebay Watcher vergleicht jedes Angebot mit Sofortkauf-Angeboten desselben Produkts und zeigt den Median
+Heuhaufen vergleicht jedes Angebot mit Sofortkauf-Angeboten desselben Produkts und zeigt den Median
 ihrer Preise. Verkaufte Preise liefert die eBay-API nicht, es sind also Angebotspreise.
 
 Woher die Vergleichsangebote kommen (Tabellen market_sources und market_items):

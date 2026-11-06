@@ -1,5 +1,5 @@
 /*
- * Ebay Watcher – kleine Helfer im Browser. Alles funktioniert auch ohne JavaScript.
+ * Heuhaufen – kleine Helfer im Browser. Alles funktioniert auch ohne JavaScript.
  *
  * Das ist die QUELLE. CodeKit verkleinert sie nach build/app/static/js/app-min.js.
  * Tailwind durchsucht diese Datei ebenfalls nach Klassen und Attributen (siehe app.css).
@@ -7,13 +7,27 @@
 (function () {
   "use strict";
 
+  // Bis November 2026 hieß das Tool „Ebay Watcher“. Was der Browser sich unter dem alten Namen gemerkt hat
+  // (Ansicht, Seitengröße, Sortierung), einmal unter dem neuen Namen übernehmen.
+  try {
+    ["view", "page-size", "sort"].forEach(function (name) {
+      var old = localStorage.getItem("ebay-watcher-" + name);
+      if (old === null) return;
+      if (localStorage.getItem("heuhaufen-" + name) === null) localStorage.setItem("heuhaufen-" + name, old);
+      localStorage.removeItem("ebay-watcher-" + name);
+    });
+  } catch (error) {
+    // Speicher gesperrt (privates Surfen): dann gelten die Vorgaben
+    console.info("Heuhaufen: gemerkte Einstellungen nicht übernommen (" + error.name + ")");
+  }
+
   // ------------------------------------------------------------------
   // Übersicht: Karten oder Liste (wird auf diesem Gerät gemerkt)
   // Schaltet das Attribut data-view um; die Klassen view-cards:… und view-list:… reagieren darauf.
 
   var collection = document.querySelector("[data-collection]");
   var viewButtons = document.querySelectorAll("button[data-set-view]");
-  var VIEW_KEY = "ebay-watcher-view";
+  var VIEW_KEY = "heuhaufen-view";
 
   // Im privaten Surfen kann der Browser den Speicher sperren. Dann gilt einfach die Standardansicht,
   // und in der Browser-Konsole steht ein kurzer Hinweis.
@@ -21,7 +35,7 @@
     try {
       localStorage.setItem(VIEW_KEY, view);
     } catch (error) {
-      console.info("Ebay Watcher: Ansicht wird nicht gespeichert (" + error.name + ")");
+      console.info("Heuhaufen: Ansicht wird nicht gespeichert (" + error.name + ")");
     }
   }
 
@@ -29,7 +43,7 @@
     try {
       return localStorage.getItem(VIEW_KEY);
     } catch (error) {
-      console.info("Ebay Watcher: gespeicherte Ansicht nicht lesbar (" + error.name + ")");
+      console.info("Heuhaufen: gespeicherte Ansicht nicht lesbar (" + error.name + ")");
       return null;
     }
   }
@@ -84,7 +98,7 @@
   // Seiten: lange Listen zeigen nur einen Teil der Angebote (Vorgabe 20, Feld „pro Seite“, auf diesem
   // Gerät gemerkt). Ausgeblendete Zeilen laden ihre Bilder erst, wenn ihre Seite drankommt.
 
-  var PAGE_KEY = "ebay-watcher-page-size";
+  var PAGE_KEY = "heuhaufen-page-size";
   var DEFAULT_PAGE_SIZE = 20;
 
   function savedPageSize() {
@@ -92,7 +106,7 @@
       var n = parseInt(localStorage.getItem(PAGE_KEY), 10);
       return n >= 1 && n <= 200 ? n : DEFAULT_PAGE_SIZE;
     } catch (error) {
-      console.info("Ebay Watcher: Seitengröße nicht lesbar (" + error.name + ")");
+      console.info("Heuhaufen: Seitengröße nicht lesbar (" + error.name + ")");
       return DEFAULT_PAGE_SIZE;
     }
   }
@@ -101,7 +115,7 @@
     try {
       localStorage.setItem(PAGE_KEY, String(n));
     } catch (error) {
-      console.info("Ebay Watcher: Seitengröße wird nicht gespeichert (" + error.name + ")");
+      console.info("Heuhaufen: Seitengröße wird nicht gespeichert (" + error.name + ")");
     }
   }
 
@@ -195,7 +209,7 @@
   // Detailseite: Angebote sortieren (wird auf diesem Gerät gemerkt).
   // Jede Zeile trägt data-sort-end, data-sort-price, data-sort-new und data-sort-distance.
 
-  var SORT_KEY = "ebay-watcher-sort";
+  var SORT_KEY = "heuhaufen-sort";
   var sortControl = document.querySelector("[data-sort-control]");
   var sortButtons = document.querySelectorAll("button[data-sort]");
 
@@ -203,7 +217,7 @@
     try {
       localStorage.setItem(SORT_KEY, key);
     } catch (error) {
-      console.info("Ebay Watcher: Sortierung wird nicht gespeichert (" + error.name + ")");
+      console.info("Heuhaufen: Sortierung wird nicht gespeichert (" + error.name + ")");
     }
   }
 
@@ -211,7 +225,7 @@
     try {
       return localStorage.getItem(SORT_KEY);
     } catch (error) {
-      console.info("Ebay Watcher: gespeicherte Sortierung nicht lesbar (" + error.name + ")");
+      console.info("Heuhaufen: gespeicherte Sortierung nicht lesbar (" + error.name + ")");
       return null;
     }
   }
@@ -293,7 +307,7 @@
       })
       .catch(function (error) {
         fold.removeAttribute("data-loaded");
-        console.info("Ebay Watcher: Liste konnte nicht geladen werden (" + error.message + ")");
+        console.info("Heuhaufen: Liste konnte nicht geladen werden (" + error.message + ")");
       });
   }
 
@@ -709,7 +723,7 @@
       })
       .catch(function (error) {
         // Ohne Galerie wenigstens das Angebot bei eBay zeigen, wie ohne JavaScript
-        console.info("Ebay Watcher: Galerie nicht verfügbar (" + error.message + ")");
+        console.info("Heuhaufen: Galerie nicht verfügbar (" + error.message + ")");
         var tab = window.open(link.href, "_blank");
         if (tab) tab.opener = null;
         else window.location.assign(link.href);   // Pop-up gesperrt: dann eben in diesem Tab

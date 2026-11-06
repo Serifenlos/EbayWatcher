@@ -1,13 +1,13 @@
-# Ebay Watcher – Docker Compose
+# Heuhaufen – Docker Compose
 #
 # Docker Compose: Werte in die Datei .env daneben schreiben (Vorlage: .env.example), dann "docker compose up -d".
 # Portainer: Stacks > Add stack > Web editor, diesen Inhalt einfügen und die Werte unter
 #            "Environment variables" eintragen.
 # Pflicht sind EBAY_CLIENT_ID, EBAY_CLIENT_SECRET und ADMIN_PASSWORD, alles andere hat Standardwerte.
 services:
-  ebay-watcher:
-    image: ghcr.io/serifenlos/ebaywatcher:latest
-    container_name: ebay-watcher
+  heuhaufen:
+    image: ghcr.io/serifenlos/heuhaufen:latest
+    container_name: heuhaufen
     restart: unless-stopped
     ports:
       - "8765:8000"

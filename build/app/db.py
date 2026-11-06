@@ -1,6 +1,7 @@
 """SQLite-Speicher. Eine Datei im Datenordner, keine externen Dienste nötig."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 import time
@@ -8,6 +9,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from . import config
+
+log = logging.getLogger("heuhaufen.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -187,9 +190,34 @@ _conn: sqlite3.Connection | None = None
 _lock = threading.RLock()
 
 
+def _adopt_legacy_database() -> None:
+    """Datenbank unter einem früheren Namen (z. B. ebay-watcher.db) unter dem neuen Namen übernehmen,
+    mit allen Gesuchen, Einstellungen, Durchschnittspreisen und Anmeldungen. Vorher schreibt SQLite
+    offene Änderungen aus der WAL-Datei in die Datenbank, damit nichts verloren geht."""
+    if config.DB_PATH.exists():
+        return
+    for name in config.LEGACY_DB_NAMES:
+        old = config.DATA_DIR / name
+        if not old.exists():
+            continue
+        con = sqlite3.connect(old)
+        try:
+            con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            con.close()
+        old.rename(config.DB_PATH)
+        for suffix in ("-wal", "-shm"):   # nach dem Checkpoint meist schon weg
+            leftover = config.DATA_DIR / (name + suffix)
+            if leftover.exists():
+                leftover.rename(config.DATA_DIR / (config.DB_PATH.name + suffix))
+        log.info("Datenbank %s übernommen als %s.", name, config.DB_PATH.name)
+        return
+
+
 def init() -> None:
     global _conn
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _adopt_legacy_database()
     _conn = sqlite3.connect(config.DB_PATH, check_same_thread=False, isolation_level=None)
     _conn.row_factory = sqlite3.Row
     _conn.execute("PRAGMA journal_mode=WAL")

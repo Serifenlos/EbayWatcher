@@ -19,7 +19,7 @@ from urllib.parse import quote
 from . import db, details, images, market, notify, signed, util
 from .ebay import EbayClient, EbayError
 
-log = logging.getLogger("ebay-watcher")
+log = logging.getLogger("heuhaufen")
 
 TICK_SECONDS = 30
 MAX_SINGLE_PUSHES = 5          # mehr neue Sofortkauf-Treffer auf einmal -> eine Sammelnachricht
@@ -56,7 +56,7 @@ class Watcher:
     # ------------------------------------------------------------ Lebenszyklus
 
     def start(self) -> None:
-        self.task = asyncio.create_task(self._loop(), name="ebay-watcher")
+        self.task = asyncio.create_task(self._loop(), name="heuhaufen")
 
     async def stop(self) -> None:
         if self.task:
@@ -189,7 +189,7 @@ class Watcher:
                 ]
                 for summary in await self.ebay.search(s["query"], filters, None, plz):
                     item_id = summary.get("itemId")
-                    if item_id:   # auch Angebote mit Versand: so kennt Ebay Watcher die Entfernung
+                    if item_id:   # auch Angebote mit Versand: so kennt Heuhaufen die Entfernung
                         found[item_id] = (summary, True)
         except EbayError as e:
             log.warning("Gesuch %s: %s", s["id"], e)
@@ -531,7 +531,7 @@ class Watcher:
 
     def _image(self, settings: dict, s: dict, v: dict) -> str | None:
         """Bild für die Benachrichtigung: aus dem eigenen Bild-Cache, wenn die Adresse von
-        Ebay Watcher eingetragen ist (das Handy muss sie erreichen), sonst direkt von eBay."""
+        Heuhaufen eingetragen ist (das Handy muss sie erreichen), sonst direkt von eBay."""
         base = self._app_base(settings)
         path = images.url(s["id"], v["item_id"], v["image"])
         if base and path:
@@ -542,12 +542,12 @@ class Watcher:
         """Knöpfe der Benachrichtigung (ntfy erlaubt höchstens drei)."""
         actions = [{"action": "view", "label": "Bei eBay öffnen", "url": v["url"], "clear": True}]
         remind_url = self._remind_url(settings, s, v) if remind else None
-        if remind_url:   # das Handy schickt den POST an Ebay Watcher, dafür muss es die Adresse erreichen
+        if remind_url:   # das Handy schickt den POST an Heuhaufen, dafür muss es die Adresse erreichen
             actions.append({"action": "http", "label": "1 Min vorher erinnern", "url": remind_url,
                             "method": "POST", "clear": False})
         link = self._app_link(settings, s)
         if link:
-            actions.append({"action": "view", "label": "In Ebay Watcher öffnen", "url": link})
+            actions.append({"action": "view", "label": "In Heuhaufen öffnen", "url": link})
         return actions
 
     @staticmethod

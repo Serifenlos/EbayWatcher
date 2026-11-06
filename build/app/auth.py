@@ -16,11 +16,13 @@ from argon2.exceptions import InvalidHashError, VerificationError
 
 from . import config, db
 
-log = logging.getLogger("ebay-watcher.auth")
+log = logging.getLogger("heuhaufen.auth")
 
-SESSION_COOKIE = "ew_session"
-PENDING_COOKIE = "ew_pending"
-LOGIN_CSRF_COOKIE = "ew_login"
+SESSION_COOKIE = "hh_session"
+PENDING_COOKIE = "hh_pending"
+LOGIN_CSRF_COOKIE = "hh_login"
+# Sitzungs-Cookie aus der Zeit als „Ebay Watcher“: gilt weiter und wird beim nächsten Aufruf umbenannt
+LEGACY_SESSION_COOKIE = "ew_session"
 
 REMEMBER_SECONDS = 90 * 24 * 3600   # "Angemeldet bleiben": 3 Monate
 SESSION_SECONDS = 12 * 3600         # normale Sitzung: höchstens 12 Stunden ...
@@ -128,6 +130,15 @@ def create_session(user_id: int, remember: bool, user_agent: str, pending: bool 
     return token
 
 
+def session_token(cookies) -> tuple[str | None, bool]:
+    """Sitzungs-Token aus den Cookies und ob es noch unter dem alten Namen steht."""
+    token = cookies.get(SESSION_COOKIE)
+    if token:
+        return token, False
+    legacy = cookies.get(LEGACY_SESSION_COOKIE)
+    return legacy, bool(legacy)
+
+
 def load_session(token: str | None, pending: bool = False) -> dict | None:
     if not token:
         return None
@@ -164,7 +175,7 @@ def new_totp_secret() -> str:
 
 
 def totp_qr_data_uri(secret: str, username: str) -> str:
-    uri = pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name="Ebay Watcher")
+    uri = pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name="Heuhaufen")
     img = qrcode.make(uri, image_factory=qrcode.image.svg.SvgPathImage, box_size=10, border=2)
     buf = io.BytesIO()
     img.save(buf)

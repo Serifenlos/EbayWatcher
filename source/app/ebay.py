@@ -10,7 +10,7 @@ import httpx
 
 from . import config, db
 
-log = logging.getLogger("ebay-watcher.ebay")
+log = logging.getLogger("heuhaufen.ebay")
 
 API = "https://api.ebay.com"
 SCOPE = "https://api.ebay.com/oauth/api_scope"
@@ -54,7 +54,7 @@ class EbayClient:
     def __init__(self) -> None:
         self._token: str | None = None
         self._token_exp = 0.0
-        self._http = httpx.AsyncClient(timeout=25.0, headers={"User-Agent": f"ebay-watcher/{config.APP_VERSION}"})
+        self._http = httpx.AsyncClient(timeout=25.0, headers={"User-Agent": f"heuhaufen/{config.APP_VERSION}"})
 
     @property
     def configured(self) -> bool:

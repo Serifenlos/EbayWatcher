@@ -52,7 +52,7 @@ def main() -> int:
         if len(parts) == 3 and parts[1].strip():
             commits.append((parts[0], parts[1].strip(), parts[2].strip()))
 
-    repo = os.environ.get("GITHUB_REPOSITORY", "Serifenlos/EbayWatcher")
+    repo = os.environ.get("GITHUB_REPOSITORY", "Serifenlos/Heuhaufen")
     server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
     version = tag[1:]
 

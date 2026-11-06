@@ -1,4 +1,4 @@
-# Ebay Watcher – Docker-Image
+# Heuhaufen – Docker-Image
 #
 # Gebaut wird vom Projekt-Hauptordner aus (dort liegt build/):
 #   docker build -f docker/Dockerfile .
