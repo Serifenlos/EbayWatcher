@@ -33,7 +33,8 @@ WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 # ---------------------------------------------------------------- Formatierung
 
-def eur(value: float | None, cents: bool = True) -> str:
+def eur(value: float | None, cents: bool = True, sign: bool = True) -> str:
+    """Betrag auf Deutsch, z. B. „1.234,50 €“; sign=False ohne €-Zeichen (Aufschlüsselung „21,50 + 6,19“)."""
     if value is None:
         return "–"
     if not cents or float(value).is_integer():
@@ -41,25 +42,34 @@ def eur(value: float | None, cents: bool = True) -> str:
     else:
         text = f"{value:,.2f}"
     text = text.replace(",", "\u2009").replace(".", ",").replace("\u2009", ".")
-    return f"{text}\u00a0€"
+    return f"{text}\u00a0€" if sign else text
 
 
-def countdown(end_ts: float | None, now: float | None = None) -> str:
+def countdown(end_ts: float | None, now: float | None = None, seconds_below: int = 600) -> str:
+    """Restlaufzeit in Stunden:Minuten, z. B. „8:54“, ab einem Tag „2 Tg 3:20“, kurz vor Ende
+    (unter seconds_below, Vorgabe die Erinnerung des Gesuchs) mit Sekunden „0:09:42“. Gleiche Regeln in app.js."""
     if not end_ts:
         return ""
     left = int(end_ts - (now or time.time()))
     if left <= 0:
         return "beendet"
-    if left < 60:
-        return "unter 1 Min"
-    minutes = left // 60
-    hours, minutes = divmod(minutes, 60)
-    days, hours = divmod(hours, 24)
+    days, rest = divmod(left, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, seconds = divmod(rest, 60)
     if days >= 1:
-        return f"{days} {'Tag' if days == 1 else 'Tage'} {hours} Std"
-    if hours >= 1:
-        return f"{hours} Std {minutes} Min"
-    return f"{minutes} Min"
+        return f"{days} Tg {hours}:{minutes:02d}"
+    if left < seconds_below:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{hours}:{minutes:02d}"
+
+
+def end_clock(end_ts: float | None, now: float | None = None) -> str:
+    """Uhrzeit des Endes, z. B. „um 7:23 Uhr“; ab einem Tag Restlaufzeit mit Wochentag „Mo. um 7:23 Uhr“."""
+    if not end_ts:
+        return ""
+    d = datetime.fromtimestamp(end_ts, ZoneInfo(config.TZ))
+    clock = f"um {d.hour}:{d:%M} Uhr"
+    return f"{WEEKDAYS[d.weekday()]}. {clock}" if end_ts - (now or time.time()) >= 86400 else clock
 
 
 def local_time(ts: float | None) -> str:
@@ -219,6 +229,7 @@ def item_view(item: dict, search: dict, now: float) -> dict:
         "within": within_limit(item, search),
         "flags": item_flags(item),
         "ends_in": (item["end_time"] - now) if item.get("end_time") else None,
+        "lead_seconds": (search.get("lead_minutes") or 10) * 60,   # ab dann Restlaufzeit mit Sekunden
         "image_count": image_count(item),
         "platform_name": plattformen.get(item.get("platform")).name,
         "condition": condition_label(item),

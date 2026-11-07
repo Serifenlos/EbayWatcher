@@ -27,7 +27,7 @@
     {% endif %}
     {# Titel und Preis: öffnen ebenfalls die Galerie mit Beschreibung (app.js). Mit gedrückter Befehls-/Strg-Taste
        oder ohne JavaScript geht es direkt zum Angebot bei der Plattform (eBay …). #}
-    <a class="group/offer grid min-w-0 items-start gap-x-5 gap-y-2 text-inherit no-underline md:grid-cols-[minmax(0,1fr)_minmax(170px,230px)] md:items-center"
+    <a class="group/offer grid min-w-0 items-start gap-x-5 gap-y-2 text-inherit no-underline md:grid-cols-[minmax(0,1fr)_minmax(170px,260px)] md:items-center"
        href="{{ v.url }}" target="_blank" rel="noopener noreferrer" data-gallery="{{ gallery_url(v) }}" data-platform="{{ v.platform_name }}">
       <span class="grid min-w-0 gap-0.75">
         <span class="line-clamp-2 leading-[1.35] font-medium group-hover/offer:underline group-hover/offer:decoration-1 group-hover/offer:underline-offset-3">{{ v.title }}</span>
@@ -37,12 +37,12 @@
       </span>
       <span class="grid justify-items-start gap-1 text-left md:justify-items-end md:text-right">
         {% if shown is not none %}
-        {# Groß der Preis mit Versand (Einstellungen → Anzeige), darunter klein, woraus er besteht #}
+        {# Groß der Preis mit Versand (Einstellungen → Anzeige), darunter klein, woraus er besteht („21,50 + 6,19“) #}
         <span class="{{ ui.num() }} text-section font-semibold">{{ eur(shown) }}</span>
         {% if v.near and v.shipping_known and v.shipping and not v.pickup_only %}
         <span class="text-meta text-muted">bei Abholung, sonst + {{ eur(v.shipping) }} Versand</span>
         {% elif v.shipping_known and v.shipping and not v.pickup_only %}
-        <span class="text-meta text-muted">{% if prices_with_shipping %}{{ eur(v.rel_price) }} + {{ eur(v.shipping) }} Versand{% else %}zzgl. {{ eur(v.shipping) }} Versand{% endif %}</span>
+        <span class="text-meta text-muted">{% if prices_with_shipping %}{{ eur(v.rel_price, sign=false) }} + {{ eur(v.shipping, sign=false) }}{% else %}zzgl. {{ eur(v.shipping) }} Versand{% endif %}</span>
         {% elif v.shipping_known and not v.shipping and not v.pickup_only %}<span class="text-meta text-muted">Versand kostenlos</span>{% endif %}
         {{ ui.limit_line(v.ratio, 'max-w-45') }}
         {% if v.market %}{% set m = v.market %}
@@ -53,7 +53,7 @@
         </span>
         {% endif %}
         {% endif %}
-        {% if v.auction and v.end_time %}<span class="text-meta text-muted">Endet in {{ ui.countdown_span(v.end_time, now) }}</span>{% endif %}
+        {% if v.auction and v.end_time %}<span class="text-meta text-muted">{{ ui.countdown_span(v.end_time, now, v.lead_seconds) }}</span>{% endif %}
         {% if v.auction and v.remind and not v.reminded %}<span class="text-meta font-medium text-accent">Erinnerung 1 Min vor Ende</span>{% endif %}
       </span>
     </a>

@@ -69,7 +69,7 @@
       {{ ui.limit_line(f.ratio) }}
       <p class="flex justify-between gap-3 text-meta text-muted">
         {% if f.auction %}
-        <span>Endet in {{ ui.countdown_span(f.end_time, now) }}</span>
+        <span>{{ ui.countdown_span(f.end_time, now, f.lead_seconds, cap=true) }}</span>
         {% else %}
         <span>Günstigster Sofortkauf</span>
         {% endif %}

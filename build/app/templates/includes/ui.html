@@ -124,8 +124,16 @@ font-num tabular-nums
 {%- endmacro %}
 
 {# Restlaufzeit, wird per JavaScript aktualisiert und färbt sich in der letzten Stunde #}
-{% macro countdown_span(end_time, now) -%}
-<span class="{{ num() }} data-soon:font-semibold data-soon:text-tight" data-end="{{ end_time|int }}">{{ countdown(end_time, now) }}</span>
+{#
+  Restlaufzeit „endet in 8:54 (um 7:23 Uhr)“. app.js hält die Zeit aktuell (data-end, data-left), in der
+  letzten Stunde hervorgehoben (data-soon), unter seconds (Erinnerung des Gesuchs) mit Sekunden. cap: „Endet“.
+#}
+{% macro countdown_span(end_time, now, seconds=600, cap=false) -%}
+{%- set left = end_time - now -%}
+<span data-end="{{ end_time|int }}" data-seconds="{{ seconds|int }}"{% if cap %} data-cap{% endif %}>
+  {%- if left > 0 %}{{ 'Endet' if cap else 'endet' }} in <span class="{{ num() }} data-soon:font-semibold data-soon:text-tight" data-left {% if left < 3600 %}data-soon{% endif %}>{{ countdown(end_time, now, seconds) }}</span>
+  {%- else %}{{ 'Beendet' if cap else 'beendet' }}{% endif -%}
+</span> <span class="whitespace-nowrap">({{ end_clock(end_time, now) }})</span>
 {%- endmacro %}
 
 {% macro csrf_field(csrf) -%}

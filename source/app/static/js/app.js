@@ -66,33 +66,42 @@
   }
 
   // ------------------------------------------------------------------
-  // Restlaufzeiten aktuell halten. In der letzten Stunde bekommt die Zeit
-  // das Attribut data-soon, das die Klassen data-soon:… hervorheben.
+  // Restlaufzeiten aktuell halten (ui.countdown_span), gleiche Regeln wie util.countdown:
+  // „8:54“, ab einem Tag „2 Tg 3:20“, unter data-seconds (Erinnerung des Gesuchs) „0:09:42“.
+  // In der letzten Stunde bekommt die Zeit data-soon, das die Klassen data-soon:… hervorheben.
 
-  function format(left) {
-    if (left <= 0) return "beendet";
-    if (left < 60) return "unter 1 Min";
-    var minutes = Math.floor(left / 60);
-    var hours = Math.floor(minutes / 60);
-    minutes = minutes % 60;
-    var days = Math.floor(hours / 24);
-    hours = hours % 24;
-    if (days >= 1) return days + (days === 1 ? " Tag " : " Tage ") + hours + " Std";
-    if (hours >= 1) return hours + " Std " + minutes + " Min";
-    return minutes + " Min";
+  function pad(n) {
+    return (n < 10 ? "0" : "") + n;
+  }
+
+  function format(left, secondsBelow) {
+    var days = Math.floor(left / 86400);
+    var rest = left % 86400;
+    var hours = Math.floor(rest / 3600);
+    var minutes = Math.floor((rest % 3600) / 60);
+    if (days >= 1) return days + " Tg " + hours + ":" + pad(minutes);
+    if (left < secondsBelow) return hours + ":" + pad(minutes) + ":" + pad(rest % 60);
+    return hours + ":" + pad(minutes);
   }
 
   function tick() {
     var now = Date.now() / 1000;
     document.querySelectorAll("[data-end]").forEach(function (el) {
       var left = Math.floor(Number(el.dataset.end) - now);
-      el.textContent = format(left);
-      el.toggleAttribute("data-soon", left > 0 && left < 3600);
+      var time = el.querySelector("[data-left]");
+      if (left <= 0) {
+        if (time) el.textContent = el.hasAttribute("data-cap") ? "Beendet" : "beendet";
+        return;
+      }
+      if (!time) return;
+      var text = format(left, Number(el.dataset.seconds) || 600);
+      if (time.textContent !== text) time.textContent = text;
+      time.toggleAttribute("data-soon", left < 3600);
     });
   }
 
   tick();
-  setInterval(tick, 15000);
+  setInterval(tick, 1000);   // jede Sekunde, damit kurz vor Ende die Sekunden laufen
 
   // ------------------------------------------------------------------
   // Seiten: lange Listen zeigen nur einen Teil der Angebote (Vorgabe 20, Feld „pro Seite“, auf diesem

@@ -28,7 +28,7 @@
         {% if v.near and v.shipping_known and v.shipping and not v.pickup_only %}
         <p class="text-meta text-muted">bei Abholung, sonst + {{ eur(v.shipping) }} Versand</p>
         {% elif v.shipping_known and v.shipping and not v.pickup_only %}
-        <p class="text-meta text-muted">{% if prices_with_shipping %}{{ eur(v.rel_price) }} + {{ eur(v.shipping) }} Versand{% else %}zzgl. {{ eur(v.shipping) }} Versand{% endif %}</p>
+        <p class="text-meta text-muted">{% if prices_with_shipping %}{{ eur(v.rel_price, sign=false) }} + {{ eur(v.shipping, sign=false) }}{% else %}zzgl. {{ eur(v.shipping) }} Versand{% endif %}</p>
         {% elif v.shipping_known and not v.shipping and not v.pickup_only %}
         <p class="text-meta text-muted">Versand kostenlos</p>
         {% endif %}
@@ -41,7 +41,7 @@
             {%- if d and d.bidders and v.bid_count %} von {{ d.bidders }} {{ 'Bieter' if d.bidders == 1 else 'Bietern' }}{% endif %}
           {%- endif -%}
         </p>
-        {% if v.auction and v.end_time %}<p>Endet in {{ ui.countdown_span(v.end_time, now) }}</p>{% endif %}
+        {% if v.auction and v.end_time %}<p>{{ ui.countdown_span(v.end_time, now, v.lead_seconds, cap=true) }}</p>{% endif %}
         {% if v.auction and d and d.min_bid and not gone %}<p>Nächstes Gebot ab {{ eur(d.min_bid) }}</p>{% endif %}
         {% if v.auction and d and d.reserve_met == 0 %}<p class="font-medium text-tight">Mindestpreis noch nicht erreicht</p>{% endif %}
         {% if gone %}<p class="font-medium text-over">Dieses Angebot ist bei {{ v.platform_name }} nicht mehr verfügbar.</p>{% endif %}

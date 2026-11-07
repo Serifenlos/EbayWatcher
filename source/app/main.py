@@ -76,7 +76,7 @@ def gallery_url(v: dict) -> str:
 
 
 templates.env.globals.update(
-    eur=util.eur, countdown=util.countdown, local_time=util.local_time, ago=util.ago, date_time=util.date_time,
+    eur=util.eur, countdown=util.countdown, end_clock=util.end_clock, local_time=util.local_time, ago=util.ago, date_time=util.date_time,
     gauge=util.gauge, asset=asset, image_url=image_url, gallery_url=gallery_url, app_name=config.APP_NAME,
     app_version=config.APP_VERSION, repo_url=config.REPO_URL,
 )
